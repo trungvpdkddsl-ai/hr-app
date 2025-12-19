@@ -4,34 +4,31 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
-import io
-from datetime import datetime
 import time
+from datetime import datetime
 
 # --- CẤU HÌNH TRANG ---
 st.set_page_config(page_title="HR Mobile Pro", layout="wide", page_icon="📱")
 
-# --- CẤU HÌNH ID THƯ MỤC DRIVE (ĐÃ CẬP NHẬT CỦA BẠN) ---
+# --- CẤU HÌNH ID THƯ MỤC DRIVE ---
+# Thay mã ID thư mục Drive thật của bạn vào đây
 FOLDER_ID_DRIVE = "1Sw91t5o-m8fwZsbGpJw8Yex_WzV8etCx" 
 
-# --- CSS BIẾN GIAO DIỆN THÀNH IPHONE STYLE ---
+# --- CSS GIAO DIỆN (IPHONE STYLE) ---
 st.markdown("""
     <style>
     .stButton>button {
         width: 100%;
-        height: 100px;
-        border-radius: 20px;
-        font-size: 20px;
+        height: 60px;
+        border-radius: 15px;
         font-weight: bold;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         transition: all 0.3s;
     }
     .stButton>button:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 8px 15px rgba(0,0,0,0.2);
+        transform: scale(1.02);
     }
+    .big-btn {height: 100px !important; font-size: 20px !important;}
     .app-icon {font-size: 40px; display: block; margin-bottom: 10px;}
-    .profile-pic {border-radius: 50%; width: 100px; height: 100px; object-fit: cover;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -39,49 +36,39 @@ st.markdown("""
 @st.cache_resource
 def get_gcp_service():
     try:
-        scope = [
-            "https://spreadsheets.google.com/feeds", 
-            "https://www.googleapis.com/auth/drive"
-        ]
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
-        
-        # Client cho Sheet
-        client_sheet = gspread.authorize(creds)
-        
-        # Client cho Drive (Upload ảnh)
+        client = gspread.authorize(creds)
         service_drive = build('drive', 'v3', credentials=creds)
-        
-        return client_sheet, service_drive
+        return client, service_drive
     except Exception as e:
         return None, None
 
 client, drive_service = get_gcp_service()
 
 # Kiểm tra kết nối
-if client is None or drive_service is None:
-    st.error("⚠️ Lỗi kết nối Google API! Hãy kiểm tra lại Secrets hoặc file JSON.")
+if not client or not drive_service:
+    st.error("⚠️ Lỗi kết nối Google API! Kiểm tra lại file secrets hoặc requirements.txt")
     st.stop()
 
 try:
-    # Mở sheet theo tên Tab mới
     sheet_ungvien = client.open("TuyenDungKCN_Data").worksheet("UngVien")
     sheet_users = client.open("TuyenDungKCN_Data").worksheet("Users")
-except Exception as e:
-    st.error("⚠️ Lỗi không tìm thấy Tab! Hãy chắc chắn file Google Sheet của bạn đã có tab tên là 'UngVien' và 'Users'.")
+except:
+    st.error("⚠️ Lỗi: Không tìm thấy Sheet! Hãy đảm bảo file Google Sheet có tab 'UngVien' và 'Users'.")
     st.stop()
 
-# --- HÀM HỖ TRỢ UPLOAD ẢNH ---
+# --- HÀM HỖ TRỢ ---
 def upload_to_drive(file_obj, file_name):
     try:
-        file_metadata = {'name': file_name, 'parents': [FOLDER_ID_DRIVE]}
+        metadata = {'name': file_name, 'parents': [FOLDER_ID_DRIVE]}
         media = MediaIoBaseUpload(file_obj, mimetype=file_obj.type)
-        file = drive_service.files().create(body=file_metadata, media_body=media, fields='id, webContentLink').execute()
-        return file.get('webContentLink') # Trả về link ảnh
-    except Exception as e:
-        st.error(f"Lỗi upload ảnh: {e}")
+        file = drive_service.files().create(body=metadata, media_body=media, fields='webContentLink').execute()
+        return file.get('webContentLink')
+    except:
         return None
 
-# --- QUẢN LÝ SESSION (TRẠNG THÁI ĐĂNG NHẬP) ---
+# --- QUẢN LÝ SESSION ---
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user_role = None
@@ -89,200 +76,203 @@ if 'logged_in' not in st.session_state:
 if 'current_page' not in st.session_state:
     st.session_state.current_page = "Home"
 
-# --- MÀN HÌNH ĐĂNG NHẬP ---
+# ==========================================
+# 1. MÀN HÌNH ĐĂNG NHẬP & ĐĂNG KÝ
+# ==========================================
 def login_screen():
-    st.markdown("<h1 style='text-align: center;'>🔐 ĐĂNG NHẬP HỆ THỐNG</h1>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1,2,1])
-    with c2:
-        with st.form("login_form"):
-            username = st.text_input("Tên đăng nhập")
-            password = st.text_input("Mật khẩu", type="password")
-            submitted = st.form_submit_button("Đăng Nhập")
-            
-            if submitted:
-                try:
-                    users = sheet_users.get_all_records()
-                    found = False
-                    for user in users:
-                        if str(user['Username']) == username and str(user['Password']) == password:
-                            st.session_state.logged_in = True
-                            st.session_state.user_role = user['Role']
-                            st.session_state.user_name = user['HoTen']
-                            found = True
-                            st.success("Đăng nhập thành công!")
-                            time.sleep(0.5)
-                            st.rerun()
-                    if not found:
-                        st.error("Sai tên đăng nhập hoặc mật khẩu!")
-                except Exception as e:
-                     st.error("Lỗi đọc dữ liệu Users. Hãy kiểm tra lại file Sheet!")
+    st.markdown("<h1 style='text-align: center;'>🔐 CỔNG THÔNG TIN HR</h1>", unsafe_allow_html=True)
+    
+    col_center = st.columns([1, 2, 1])
+    with col_center[1]:
+        tab1, tab2 = st.tabs(["🔑 ĐĂNG NHẬP", "📝 ĐĂNG KÝ MỚI"])
+        
+        # --- TAB ĐĂNG NHẬP ---
+        with tab1:
+            with st.form("login_form"):
+                username = st.text_input("Tên đăng nhập")
+                password = st.text_input("Mật khẩu", type="password")
+                btn_login = st.form_submit_button("Đăng Nhập Ngay")
+                
+                if btn_login:
+                    try:
+                        users = sheet_users.get_all_records()
+                        found = False
+                        for user in users:
+                            # Lưu ý: So sánh chuỗi để tránh lỗi kiểu dữ liệu
+                            if str(user['Username']).strip() == username.strip() and str(user['Password']).strip() == password.strip():
+                                st.session_state.logged_in = True
+                                st.session_state.user_role = user['Role']
+                                st.session_state.user_name = user['HoTen']
+                                found = True
+                                st.success(f"Chào mừng {user['HoTen']}!")
+                                time.sleep(0.5)
+                                st.rerun()
+                        if not found:
+                            st.error("Sai tài khoản hoặc mật khẩu!")
+                    except Exception as e:
+                        st.error(f"Lỗi hệ thống: {e}")
 
-# --- MÀN HÌNH CHÍNH (IPHONE STYLE) ---
+        # --- TAB ĐĂNG KÝ ---
+        with tab2:
+            st.info("Tài khoản mới sẽ có quyền mặc định là 'Nhân viên'.")
+            with st.form("register_form"):
+                new_user = st.text_input("Tên đăng nhập mới (*)")
+                new_pass = st.text_input("Mật khẩu (*)", type="password")
+                new_name = st.text_input("Họ và tên của bạn (*)")
+                btn_register = st.form_submit_button("Đăng Ký Tài Khoản")
+                
+                if btn_register:
+                    if new_user and new_pass and new_name:
+                        # Kiểm tra trùng tên đăng nhập
+                        existing_users = sheet_users.col_values(1) # Lấy cột Username
+                        if new_user in existing_users:
+                            st.warning("Tên đăng nhập này đã tồn tại! Vui lòng chọn tên khác.")
+                        else:
+                            # Mặc định role là 'staff'
+                            sheet_users.append_row([new_user, new_pass, "staff", new_name])
+                            st.success("✅ Đăng ký thành công! Hãy quay lại tab Đăng Nhập.")
+                    else:
+                        st.error("Vui lòng điền đầy đủ thông tin!")
+
+# ==========================================
+# 2. MÀN HÌNH CHÍNH (DASHBOARD)
+# ==========================================
 def home_screen():
-    st.markdown(f"### 👋 Xin chào, {st.session_state.user_name} ({st.session_state.user_role})")
-    if st.button("🚪 Đăng xuất"):
+    st.markdown(f"### 👋 Xin chào, **{st.session_state.user_name}**")
+    
+    # Hiển thị vai trò (Role badge)
+    role_color = "red" if st.session_state.user_role == "admin" else "blue"
+    st.markdown(f"Quyền hạn: <span style='color:{role_color}; font-weight:bold; border:1px solid {role_color}; padding:2px 5px; border-radius:5px'>{st.session_state.user_role.upper()}</span>", unsafe_allow_html=True)
+
+    if st.button("🚪 Đăng xuất", key="logout"):
         st.session_state.logged_in = False
         st.rerun()
         
     st.markdown("---")
     
-    # Giao diện lưới 2 cột
-    col1, col2 = st.columns(2)
-    
-    with col1:
+    # Menu dạng lưới
+    c1, c2 = st.columns(2)
+    with c1:
         st.markdown('<div class="app-icon">➕</div>', unsafe_allow_html=True)
-        if st.button("NHẬP HỒ SƠ"):
+        if st.button("NHẬP HỒ SƠ", key="btn_input"):
             st.session_state.current_page = "Input"
             st.rerun()
             
         st.markdown('<div class="app-icon">📊</div>', unsafe_allow_html=True)
-        if st.button("BÁO CÁO"):
+        if st.button("BÁO CÁO", key="btn_report"):
             st.session_state.current_page = "Report"
             st.rerun()
 
-    with col2:
+    with c2:
         st.markdown('<div class="app-icon">📋</div>', unsafe_allow_html=True)
-        if st.button("DANH SÁCH"):
+        if st.button("DANH SÁCH", key="btn_list"):
             st.session_state.current_page = "List"
             st.rerun()
 
-        # Chỉ Admin mới thấy nút quản lý nhân viên
-        if st.session_state.user_role == "admin":
+        # Nút Admin chỉ hiện với Admin/Manager
+        if st.session_state.user_role in ["admin", "manager"]:
             st.markdown('<div class="app-icon">⚙️</div>', unsafe_allow_html=True)
-            if st.button("QUẢN TRỊ VIÊN"):
+            if st.button("QUẢN TRỊ", key="btn_admin"):
                 st.session_state.current_page = "Admin"
                 st.rerun()
         else:
             st.markdown('<div class="app-icon">🔒</div>', unsafe_allow_html=True)
-            st.info("Menu Admin")
+            st.button("Admin (Khóa)", disabled=True)
 
-# --- TRANG NHẬP HỒ SƠ (CÓ ẢNH) ---
+# ==========================================
+# 3. CÁC TRANG CHỨC NĂNG
+# ==========================================
+
 def input_page():
-    if st.button("⬅️ Quay về"):
-        st.session_state.current_page = "Home"
-        st.rerun()
-        
-    st.header("📝 Thêm Ứng Viên Mới")
+    if st.button("⬅️ Quay về"): st.session_state.current_page = "Home"; st.rerun()
+    st.header("📝 Nhập Hồ Sơ Ứng Viên")
     
     with st.form("add_candidate"):
         c1, c2 = st.columns([1, 2])
         with c1:
-            # Upload ảnh
             uploaded_file = st.file_uploader("Ảnh chân dung", type=['png', 'jpg', 'jpeg'])
-            if uploaded_file:
-                st.image(uploaded_file, width=150, caption="Preview")
-        
+            if uploaded_file: st.image(uploaded_file, width=150)
         with c2:
             name = st.text_input("Họ tên (*)")
             phone = st.text_input("Số điện thoại (*)")
             yob = st.number_input("Năm sinh", 1980, 2010, 2000)
             
-        pos = st.selectbox("Vị trí", ["Công nhân", "Kỹ thuật", "Bảo vệ", "Tạp vụ", "Khác"])
-        source = st.selectbox("Nguồn", ["Facebook", "Zalo", "Giới thiệu", "Trực tiếp"])
+        c3, c4 = st.columns(2)
+        pos = c3.selectbox("Vị trí", ["Công nhân", "Kỹ thuật", "Bảo vệ", "Tạp vụ", "Khác"])
+        source = c4.selectbox("Nguồn", ["Facebook", "Zalo", "Giới thiệu", "Trực tiếp"])
         note = st.text_area("Ghi chú")
         
-        btn = st.form_submit_button("Lưu Hồ Sơ")
-        
-        if btn:
+        if st.form_submit_button("Lưu Hồ Sơ"):
             if not name or not phone:
                 st.error("Thiếu tên hoặc SĐT!")
             else:
-                with st.spinner("Đang xử lý ảnh và dữ liệu..."):
-                    image_link = ""
-                    if uploaded_file:
-                        # Upload lên Drive
-                        file_name = f"{name}_{phone}_{datetime.now().strftime('%Y%m%d')}.jpg"
-                        image_link = upload_to_drive(uploaded_file, file_name)
+                with st.spinner("Đang lưu..."):
+                    link = upload_to_drive(uploaded_file, f"{name}_{phone}.jpg") if uploaded_file else ""
+                    sheet_ungvien.append_row([
+                        datetime.now().strftime("%d/%m/%Y"), name, yob, "", f"'{phone}", pos, "Mới nhận", note, source, link
+                    ])
+                    st.success("Đã lưu!"); time.sleep(1); st.rerun()
 
-                    # Lưu vào Sheet
-                    row = [
-                        datetime.now().strftime("%d/%m/%Y"),
-                        name, yob, "", f"'{phone}", pos, "Mới nhận", note, source, image_link
-                    ]
-                    sheet_ungvien.append_row(row)
-                    st.success("✅ Đã lưu thành công!")
-                    time.sleep(1)
-                    st.rerun()
-
-# --- TRANG DANH SÁCH (CÓ HIỆN ẢNH) ---
 def list_page():
-    if st.button("⬅️ Quay về"):
-        st.session_state.current_page = "Home"
-        st.rerun()
-        
+    if st.button("⬅️ Quay về"): st.session_state.current_page = "Home"; st.rerun()
     st.header("📋 Danh Sách Hồ Sơ")
-    data = sheet_ungvien.get_all_records()
-    df = pd.DataFrame(data)
     
+    df = pd.DataFrame(sheet_ungvien.get_all_records())
     if not df.empty:
-        search = st.text_input("Tìm kiếm (Tên/SĐT)...")
+        search = st.text_input("🔍 Tìm kiếm tên hoặc SĐT...")
         if search:
             df = df[df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
-        
-        # Hiển thị dạng Card đẹp thay vì bảng
+            
         for i, row in df.iterrows():
             with st.expander(f"{row['HoTen']} - {row['ViTri']}"):
-                c_img, c_info = st.columns([1, 3])
-                with c_img:
-                    if row.get('LinkAnh'):
-                        st.image(row['LinkAnh'], width=100)
-                    else:
-                        st.write("📷 Không có ảnh")
-                with c_info:
-                    st.write(f"📞 **SĐT:** {row['SDT']}")
-                    st.write(f"🏷️ **Trạng thái:** {row['TrangThai']}")
-                    st.write(f"ℹ️ **Nguồn:** {row.get('Nguồn', '')}")
-                    if row.get('GhiChu'):
-                         st.info(f"Note: {row['GhiChu']}")
+                c1, c2 = st.columns([1,3])
+                c1.image(row['LinkAnh'] if row.get('LinkAnh') else "https://via.placeholder.com/150", width=100)
+                c2.write(f"📞 {row['SDT']} | 📅 {row.get('NgayNhap','')}")
+                c2.info(f"Note: {row.get('GhiChu','')}")
 
-# --- TRANG QUẢN LÝ USER (CHỈ ADMIN) ---
 def admin_page():
-    if st.button("⬅️ Quay về"):
-        st.session_state.current_page = "Home"
-        st.rerun()
+    if st.button("⬅️ Quay về"): st.session_state.current_page = "Home"; st.rerun()
+    st.header("⚙️ Quản Trị Hệ Thống")
     
-    st.header("⚙️ Quản Lý Tài Khoản Nhân Viên")
+    # Chỉ Admin mới được vào sâu
+    if st.session_state.user_role != "admin":
+        st.warning("Bạn là Manager, chỉ được xem báo cáo, không được chỉnh sửa User.")
+        return
+
+    st.subheader("1. Danh sách nhân viên")
+    users = sheet_users.get_all_records()
+    df_users = pd.DataFrame(users)
+    st.dataframe(df_users)
+
+    st.markdown("---")
+    st.subheader("2. Phân Quyền (Set Role)")
+    st.info("Chọn tên đăng nhập của nhân viên và cấp quyền mới cho họ.")
     
-    # Tạo user mới
-    with st.form("new_user"):
-        st.write("Tạo tài khoản mới:")
-        c1, c2 = st.columns(2)
-        with c1:
-            u_user = st.text_input("Username (Tên đăng nhập)")
-            u_name = st.text_input("Tên nhân viên")
-        with c2:
-            u_pass = st.text_input("Password (Mật khẩu)")
-            u_role = st.selectbox("Phân quyền", ["staff", "admin"])
-            
-        if st.form_submit_button("Thêm nhân viên"):
-            if u_user and u_pass:
-                sheet_users.append_row([u_user, u_pass, u_role, u_name])
-                st.success("Đã thêm thành công!")
+    with st.form("update_role_form"):
+        # Lấy danh sách username
+        user_list = [u['Username'] for u in users]
+        selected_user = st.selectbox("Chọn nhân viên cần sửa:", user_list)
+        new_role = st.selectbox("Chọn quyền mới:", ["staff", "manager", "admin"])
+        
+        if st.form_submit_button("Cập nhật quyền"):
+            try:
+                # Tìm dòng chứa username đó để sửa
+                cell = sheet_users.find(selected_user)
+                # Cột Role là cột thứ 3 (C)
+                sheet_users.update_cell(cell.row, 3, new_role)
+                st.success(f"Đã thăng chức cho {selected_user} thành {new_role}!")
                 time.sleep(1)
                 st.rerun()
-            else:
-                st.error("Vui lòng điền đủ thông tin")
+            except Exception as e:
+                st.error(f"Lỗi: {e}")
 
-    # Xem danh sách user
-    st.subheader("Danh sách hiện tại:")
-    users = sheet_users.get_all_records()
-    st.dataframe(pd.DataFrame(users))
-
-# --- LOGIC ĐIỀU HƯỚNG CHÍNH ---
+# --- ĐIỀU HƯỚNG ---
 if not st.session_state.logged_in:
     login_screen()
 else:
-    if st.session_state.current_page == "Home":
-        home_screen()
-    elif st.session_state.current_page == "Input":
-        input_page()
-    elif st.session_state.current_page == "List":
-        list_page()
-    elif st.session_state.current_page == "Report":
-        st.title("📊 Báo cáo")
-        st.info("Tính năng đang được cập nhật thêm biểu đồ...")
-        if st.button("⬅️ Quay về"):
-            st.session_state.current_page = "Home"
-            st.rerun()
-    elif st.session_state.current_page == "Admin":
-        admin_page()
+    if st.session_state.current_page == "Home": home_screen()
+    elif st.session_state.current_page == "Input": input_page()
+    elif st.session_state.current_page == "List": list_page()
+    elif st.session_state.current_page == "Admin": admin_page()
+    elif st.session_state.current_page == "Report": 
+        st.title("📊 Báo Cáo"); st.button("⬅️ Quay về", on_click=lambda: st.session_state.update(current_page="Home"))
