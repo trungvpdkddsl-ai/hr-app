@@ -8,33 +8,58 @@ import time
 from datetime import datetime
 import qrcode
 from io import BytesIO
-from PIL import Image
 
 # --- CẤU HÌNH TRANG ---
-st.set_page_config(page_title="HR Pro Ultimate", layout="wide", page_icon="💎")
+st.set_page_config(page_title="HR Pro Dashboard", layout="wide", page_icon="💠")
 
-# --- CẤU HÌNH ID DRIVE ---
+# --- CẤU HÌNH ID DRIVE (GIỮ NGUYÊN) ---
 FOLDER_ID_DRIVE = "1Sw91t5o-m8fwZsbGpJw8Yex_WzV8etCx"
 
-# --- CSS GIAO DIỆN ---
+# --- CSS TÙY BIẾN GIAO DIỆN Ô VUÔNG ---
 st.markdown("""
     <style>
+    /* Ẩn menu mặc định của Streamlit cho gọn */
+    #MainMenu {visibility: hidden;}
+    
+    /* Style cho các nút Dashboard (Ô vuông) */
+    div.stButton > button:first-child {
+        height: 120px;
+        width: 100%;
+        border-radius: 15px;
+        border: none;
+        background-color: #f8f9fa;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        color: #333;
+        font-size: 20px;
+        font-weight: bold;
+        transition: all 0.3s ease;
+    }
+    div.stButton > button:first-child:hover {
+        background-color: #e3f2fd;
+        transform: translateY(-5px);
+        box-shadow: 0 8px 15px rgba(0,0,0,0.2);
+        color: #0d47a1;
+        border: 2px solid #0d47a1;
+    }
+    
+    /* Style cho Card thống kê */
+    .metric-card {
+        background-color: white;
+        padding: 20px;
+        border-radius: 10px;
+        border-left: 5px solid #2196F3;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        text-align: center;
+    }
+    .metric-value {font-size: 32px; font-weight: bold; color: #1565c0;}
+    .metric-label {font-size: 14px; color: #666; text-transform: uppercase;}
+    
+    /* Nút Social nhỏ */
     .social-btn {
         display: inline-block; padding: 4px 10px; border-radius: 4px; color: white !important;
         text-decoration: none; font-size: 11px; margin-right: 4px; font-weight: bold;
     }
-    .zalo {background-color: #0068FF;}
-    .fb {background-color: #1877F2;}
-    .tiktok {background-color: #000000;}
-    
-    .kpi-box {
-        background-color: #f0f4c3; padding: 10px; border-radius: 8px; border-left: 5px solid #c0ca33;
-    }
-    
-    .salary-result {
-        background-color: #e3f2fd; padding: 20px; border-radius: 10px; 
-        text-align: center; font-size: 20px; font-weight: bold; color: #1565c0;
-    }
+    .zalo {background-color: #0068FF;} .fb {background-color: #1877F2;} .tiktok {background-color: #000000;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -60,7 +85,7 @@ try:
     sheet_ungvien = client.open("TuyenDungKCN_Data").worksheet("UngVien")
     sheet_users = client.open("TuyenDungKCN_Data").worksheet("Users")
 except:
-    st.error("⚠️ Không tìm thấy Sheet! Hãy kiểm tra lại.")
+    st.error("⚠️ Không tìm thấy Sheet!")
     st.stop()
 
 # --- HÀM HỖ TRỢ ---
@@ -70,250 +95,213 @@ def upload_to_drive(file_obj, file_name):
         media = MediaIoBaseUpload(file_obj, mimetype=file_obj.type)
         file = drive_service.files().create(body=metadata, media_body=media, fields='webContentLink').execute()
         return file.get('webContentLink')
-    except:
-        return None
-
-def format_zalo_link(phone):
-    p = str(phone).replace("'", "").strip()
-    if p.startswith("0"): p = "84" + p[1:]
-    return f"https://zalo.me/{p}"
+    except: return None
 
 def generate_qr(data):
     qr = qrcode.QRCode(version=1, box_size=10, border=5)
-    qr.add_data(data)
-    qr.make(fit=True)
+    qr.add_data(data); qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
-    buf = BytesIO()
-    img.save(buf)
+    buf = BytesIO(); img.save(buf)
     return buf.getvalue()
 
 def check_blacklist(cccd, df):
     if df.empty: return False
-    # Kiểm tra nếu CCCD nằm trong danh sách những người có trạng thái 'Vĩnh viễn không tuyển'
-    blacklist = df[df['TrangThai'] == "Vĩnh viễn không tuyển"]
-    if str(cccd) in blacklist['CCCD'].astype(str).values:
-        return True
-    return False
+    return str(cccd) in df[df['TrangThai'] == "Vĩnh viễn không tuyển"]['CCCD'].astype(str).values
 
-# --- LOGIN ---
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-    st.session_state.user_role = None
-    st.session_state.user_name = None
+# --- QUẢN LÝ ĐIỀU HƯỚNG ---
+if 'logged_in' not in st.session_state: st.session_state.logged_in = False
+if 'current_page' not in st.session_state: st.session_state.current_page = "dashboard"
 
+def navigate_to(page):
+    st.session_state.current_page = page
+    st.rerun()
+
+# --- LOGIN SCREEN ---
 def login_screen():
+    st.markdown("<br><br><h1 style='text-align: center;'>💠 HR MANAGEMENT SYSTEM</h1>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1,1,1])
     with c2:
-        st.markdown("<h2 style='text-align: center;'>🔐 HR SYSTEM V6</h2>", unsafe_allow_html=True)
-        tab1, tab2 = st.tabs(["Đăng Nhập", "Đăng Ký"])
-        with tab1:
-            with st.form("login"):
-                u = st.text_input("Username")
-                p = st.text_input("Password", type="password")
-                if st.form_submit_button("Đăng Nhập", use_container_width=True):
-                    users = sheet_users.get_all_records()
-                    for user in users:
-                        if str(user['Username']) == u and str(user['Password']) == p:
-                            st.session_state.logged_in = True
-                            st.session_state.user_role = user['Role']
-                            st.session_state.user_name = user['HoTen']
-                            st.rerun()
-                    st.error("Sai thông tin!")
-        with tab2:
-            with st.form("reg"):
-                nu = st.text_input("User mới"); np = st.text_input("Pass mới", type="password"); nn = st.text_input("Họ tên")
-                if st.form_submit_button("Đăng Ký"):
-                    sheet_users.append_row([nu, np, "staff", nn])
-                    st.success("Tạo thành công!")
+        with st.form("login"):
+            u = st.text_input("Username")
+            p = st.text_input("Password", type="password")
+            if st.form_submit_button("ĐĂNG NHẬP", use_container_width=True):
+                users = sheet_users.get_all_records()
+                for user in users:
+                    if str(user['Username']) == u and str(user['Password']) == p:
+                        st.session_state.logged_in = True
+                        st.session_state.user_role = user['Role']
+                        st.session_state.user_name = user['HoTen']
+                        st.rerun()
+                st.error("Sai thông tin!")
 
-# --- MAIN APP ---
+# --- GIAO DIỆN CHÍNH ---
 def main_app():
-    # MENU BÊN TRÁI
-    with st.sidebar:
-        st.markdown(f"### 👤 {st.session_state.user_name}")
-        role_color = "red" if st.session_state.user_role == "admin" else "blue"
-        st.markdown(f"Quyền: <b style='color:{role_color}'>{st.session_state.user_role.upper()}</b>", unsafe_allow_html=True)
-        
-        # Danh sách Menu đầy đủ
-        menu_options = [
-            "🏠 Trang Chủ", 
-            "📝 Nhập Hồ Sơ", 
-            "📋 Danh Sách & Social", 
-            "📊 Báo Cáo & KPI", 
-            "🖩 Tính Lương Nhanh"
-        ]
-        if st.session_state.user_role == "admin":
-            menu_options.append("⚙️ Quản Trị Hệ Thống")
-            
-        menu = st.radio("CHỨC NĂNG", menu_options)
-        
-        st.markdown("---")
-        if st.button("Đăng xuất"): st.session_state.logged_in = False; st.rerun()
-
-    # LOAD DATA
+    # Load dữ liệu
     df = pd.DataFrame(sheet_ungvien.get_all_records())
 
-    # 1. TRANG CHỦ
-    if "Trang Chủ" in menu:
-        st.title("🚀 Tổng Quan Hệ Thống")
-        if not df.empty:
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Tổng hồ sơ", len(df))
-            c2.metric("Chờ phỏng vấn", len(df[df['TrangThai'] == 'Mới nhận']))
-            c3.metric("Có TikTok/FB", len(df[df['LinkTikTok'] != '']) + len(df[df['LinkFB'] != '']))
-            c4.metric("Đủ giấy tờ", len(df[df['TrangThaiHoSo'] == 'Đủ giấy tờ']))
-            
-            st.markdown("---")
-            st.info("💡 Mẹo: Dùng menu 'Tính Lương Nhanh' để tư vấn thu nhập cho công nhân mới.")
+    # --- SIDEBAR (CHỈ CHỨA INFO VÀ NÚT HOME) ---
+    with st.sidebar:
+        st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=80)
+        st.markdown(f"### 👋 {st.session_state.user_name}")
+        st.markdown(f"Vai trò: **{st.session_state.user_role.upper()}**")
+        
+        st.markdown("---")
+        if st.button("🏠 TRANG CHỦ (MENU)", use_container_width=True):
+            navigate_to("dashboard")
+        
+        if st.button("🚪 Đăng xuất", use_container_width=True):
+            st.session_state.logged_in = False
+            st.rerun()
 
-    # 2. NHẬP HỒ SƠ (ĐẦY ĐỦ 17 CỘT)
-    elif "Nhập Hồ Sơ" in menu:
-        st.header("📝 Nhập Liệu Toàn Diện")
+    # --- TRANG 1: DASHBOARD (MENU Ô VUÔNG) ---
+    if st.session_state.current_page == "dashboard":
+        st.title("🎛️ Bảng Điều Khiển Trung Tâm")
+        st.markdown("Chọn chức năng bên dưới:")
+        
+        # Hàng 1
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("📝\nNHẬP HỒ SƠ", use_container_width=True): navigate_to("input")
+        with c2:
+            if st.button("📋\nDANH SÁCH & SOCIAL", use_container_width=True): navigate_to("list")
+        with c3:
+            if st.button("📊\nBÁO CÁO & KPI", use_container_width=True): navigate_to("report")
+            
+        # Hàng 2
+        c4, c5, c6 = st.columns(3)
+        with c4:
+            if st.button("🖩\nTÍNH LƯƠNG NHANH", use_container_width=True): navigate_to("salary")
+        with c5:
+            # Chỉ Admin mới bấm được nút này
+            if st.session_state.user_role == "admin":
+                if st.button("⚙️\nQUẢN TRỊ ADMIN", use_container_width=True): navigate_to("admin")
+            else:
+                st.button("🔒\nADMIN (KHÓA)", disabled=True, use_container_width=True)
+        with c6:
+             st.info(f"📅 Hôm nay: {datetime.now().strftime('%d/%m/%Y')}")
+
+        # Thống kê nhanh bên dưới
+        st.markdown("---")
+        if not df.empty:
+            st.subheader("Tiến độ hôm nay")
+            today = datetime.now().strftime("%d/%m/%Y")
+            today_count = len(df[df['NgayNhap'].astype(str).str.contains(today)])
+            st.progress(min(today_count / 10, 1.0))
+            st.caption(f"Đã nhập {today_count} hồ sơ hôm nay (Mục tiêu: 10)")
+
+    # --- TRANG 2: NHẬP HỒ SƠ ---
+    elif st.session_state.current_page == "input":
+        st.header("📝 Nhập Hồ Sơ Ứng Viên")
         with st.form("full_input"):
             c1, c2 = st.columns([1, 2])
             with c1:
-                uploaded_file = st.file_uploader("Ảnh chân dung", type=['jpg','png'])
+                uploaded_file = st.file_uploader("Ảnh 3x4", type=['jpg','png'])
                 if uploaded_file: st.image(uploaded_file, width=120)
             with c2:
                 name = st.text_input("Họ tên (*)")
                 phone = st.text_input("SĐT (*)")
-                cccd = st.text_input("CCCD/CMND (*)", help="Hệ thống sẽ check trùng và blacklist")
+                cccd = st.text_input("CCCD (*)")
+            
+            c3, c4 = st.columns(2)
+            yob = c3.number_input("Năm sinh", 1980, 2010, 2000)
+            hometown = c4.text_input("Quê quán")
+            pos = st.selectbox("Vị trí", ["Công nhân", "Kỹ thuật", "Kho", "Bảo vệ", "Tạp vụ"])
             
             st.markdown("---")
-            col_a, col_b, col_c = st.columns(3)
-            yob = col_a.number_input("Năm sinh", 1970, 2010, 2000)
-            hometown = col_b.text_input("Quê quán")
-            pos = col_c.selectbox("Vị trí", ["Công nhân", "Kỹ thuật", "Kho", "Bảo vệ", "Tạp vụ"])
+            st.write("Thông tin bổ sung:")
+            r1, r2, r3 = st.columns(3)
+            bus = r1.selectbox("Xe tuyến", ["Tự túc", "Tuyến A", "Tuyến B"])
+            source = r2.selectbox("Nguồn", ["Facebook", "Zalo", "Trực tiếp", "Giới thiệu"])
+            doc = r3.selectbox("Giấy tờ", ["Chưa có", "Đủ giấy tờ", "Thiếu khám SK"])
             
-            col_d, col_e, col_f = st.columns(3)
-            source = col_d.selectbox("Nguồn", ["Facebook", "Zalo", "TikTok", "Trực tiếp", "Giới thiệu"])
-            fb_link = col_e.text_input("Link Facebook")
-            tt_link = col_f.text_input("Link TikTok")
+            fb = st.text_input("Link Facebook")
             
-            col_g, col_h, col_i = st.columns(3)
-            bus = col_g.selectbox("Xe tuyến", ["Tự túc", "Tuyến A", "Tuyến B", "Tuyến C"])
-            ktx = col_h.selectbox("Ở KTX?", ["Không", "Có đăng ký"])
-            doc_status = col_i.selectbox("Giấy tờ", ["Chưa có", "Thiếu khám SK", "Đủ giấy tờ"])
-            
-            note = st.text_area("Ghi chú phỏng vấn")
-            
-            if st.form_submit_button("LƯU HỒ SƠ", type="primary"):
+            if st.form_submit_button("💾 LƯU HỒ SƠ", type="primary"):
                 if not name or not phone or not cccd:
-                    st.error("Thiếu thông tin bắt buộc (Tên, SĐT, CCCD)")
+                    st.error("Thiếu Tên, SĐT hoặc CCCD!")
                 elif not df.empty and str(cccd) in df['CCCD'].astype(str).values:
-                    st.warning(f"⚠️ Trùng CCCD: {cccd} đã có trong hệ thống!")
-                elif check_blacklist(cccd, df):
-                    st.error("⛔ CẢNH BÁO: Ứng viên này nằm trong Blacklist!")
+                    st.warning("⚠️ Trùng CCCD!")
                 else:
                     with st.spinner("Đang lưu..."):
-                        link_img = upload_to_drive(uploaded_file, f"{name}_{cccd}.jpg") if uploaded_file else ""
-                        row = [
-                            datetime.now().strftime("%d/%m/%Y"), # 1.Ngay
-                            name.upper(), yob, hometown, f"'{phone}", f"'{cccd}", # 2-6
-                            pos, "Mới nhận", note, source, link_img, # 7-11
-                            bus, ktx, st.session_state.user_name, # 12-14
-                            fb_link, tt_link, doc_status # 15-17
-                        ]
+                        link = upload_to_drive(uploaded_file, f"{name}.jpg") if uploaded_file else ""
+                        row = [datetime.now().strftime("%d/%m/%Y"), name.upper(), yob, hometown, f"'{phone}", f"'{cccd}", pos, "Mới nhận", "", source, link, bus, "Không", st.session_state.user_name, fb, "", doc]
                         sheet_ungvien.append_row(row)
-                        st.success("✅ Lưu thành công!")
-                        time.sleep(1); st.rerun()
+                        st.success("✅ Đã lưu!"); time.sleep(1); navigate_to("input")
 
-    # 3. DANH SÁCH (CARD VIEW + QR + SOCIAL)
-    elif "Danh Sách" in menu:
-        st.header("📋 Danh Sách Hồ Sơ")
-        search = st.text_input("🔍 Tìm kiếm (Tên, SĐT, CCCD)...")
+    # --- TRANG 3: BÁO CÁO (KHOA HỌC) ---
+    elif st.session_state.current_page == "report":
+        st.header("📊 Báo Cáo & Phân Tích")
         
-        # Nút xuất Excel
+        if df.empty: st.info("Chưa có dữ liệu."); return
+        
+        # 1. Thẻ chỉ số (Metric Cards)
+        st.subheader("1. Tổng quan")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.markdown(f'<div class="metric-card"><div class="metric-value">{len(df)}</div><div class="metric-label">Tổng hồ sơ</div></div>', unsafe_allow_html=True)
+        m2.markdown(f'<div class="metric-card"><div class="metric-value">{len(df[df["TrangThai"]=="Đã đi làm"])}</div><div class="metric-label">Đã đi làm</div></div>', unsafe_allow_html=True)
+        m3.markdown(f'<div class="metric-card"><div class="metric-value">{len(df[df["TrangThaiHoSo"]=="Đủ giấy tờ"])}</div><div class="metric-label">Đủ hồ sơ gốc</div></div>', unsafe_allow_html=True)
+        m4.markdown(f'<div class="metric-card"><div class="metric-value">{len(df[df["Nguon"]=="Facebook"])}</div><div class="metric-label">Từ Facebook</div></div>', unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # 2. Phân tích sâu (Chia tab)
+        tab1, tab2 = st.tabs(["🏆 KPI Nhân Viên (Leaderboard)", "📈 Biểu Đồ Phễu"])
+        
+        with tab1:
+            st.markdown("### Bảng xếp hạng tuyển dụng tháng này")
+            if 'NguoiTuyen' in df.columns:
+                kpi_df = df['NguoiTuyen'].value_counts().reset_index()
+                kpi_df.columns = ['Nhân viên', 'Số lượng']
+                st.dataframe(kpi_df, use_container_width=True, hide_index=True)
+                st.bar_chart(kpi_df.set_index('Nhân viên'))
+            else:
+                st.warning("Thiếu cột dữ liệu Người Tuyển.")
+                
+        with tab2:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.write("**Tỷ lệ chuyển đổi theo Vị trí**")
+                st.bar_chart(df['ViTri'].value_counts())
+            with c2:
+                st.write("**Nguồn ứng viên hiệu quả nhất**")
+                st.bar_chart(df['Nguồn'].value_counts())
+
+    # --- TRANG 4: DANH SÁCH ---
+    elif st.session_state.current_page == "list":
+        st.header("📋 Tra Cứu Hồ Sơ")
+        search = st.text_input("🔍 Tìm kiếm nhanh (Tên/SĐT/CCCD)")
         if not df.empty:
-            csv = df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 Tải danh sách Excel", csv, "hr_data.csv", "text/csv")
-        
-            if search:
-                df = df[df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
+            if search: df = df[df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
+            st.dataframe(df[['HoTen', 'SDT', 'ViTri', 'TrangThai', 'Nguồn']], use_container_width=True, hide_index=True)
             
-            for i, row in df.iterrows():
-                with st.expander(f"👤 {row['HoTen']} - {row['ViTri']}"):
-                    c1, c2, c3 = st.columns([1, 2, 1])
-                    with c1:
-                        if row.get('LinkAnh'): st.image(row['LinkAnh'], width=100)
-                        # QR Code
-                        qr_info = f"{row['HoTen']}\n{row['SDT']}\n{row.get('CCCD','')}"
-                        st.image(generate_qr(qr_info), width=80, caption="Scan Me")
-                    with c2:
-                        st.write(f"📞 **SĐT:** {row['SDT']} | 🆔 **CCCD:** {row.get('CCCD','')}")
-                        st.write(f"🏠 **Quê:** {row['QueQuan']} | 🚌 **Xe:** {row.get('XeTuyen','')}")
-                        st.write(f"📂 **Giấy tờ:** {row.get('TrangThaiHoSo','')}")
-                        st.info(f"Note: {row.get('GhiChu','')}")
-                    with c3:
-                        st.write("**Liên hệ & Social:**")
-                        zalo = format_zalo_link(row['SDT'])
-                        st.markdown(f'<a href="{zalo}" target="_blank" class="social-btn zalo">Chat Zalo</a>', unsafe_allow_html=True)
-                        if row.get('LinkFB'):
-                            st.markdown(f'<a href="{row["LinkFB"]}" target="_blank" class="social-btn fb">Facebook</a>', unsafe_allow_html=True)
-                        if row.get('LinkTikTok'):
-                            st.markdown(f'<a href="{row["LinkTikTok"]}" target="_blank" class="social-btn tiktok">TikTok</a>', unsafe_allow_html=True)
+            with st.expander("Xem chi tiết & Mã QR"):
+                for i, row in df.iterrows():
+                    st.markdown(f"**{row['HoTen']}** - {row['SDT']}")
+                    st.image(generate_qr(f"{row['HoTen']}-{row['CCCD']}"), width=80)
+                    st.markdown("---")
 
-    # 4. BÁO CÁO & KPI (ĐÃ KHÔI PHỤC)
-    elif "Báo Cáo" in menu:
-        st.header("📊 Báo Cáo Hiệu Quả & KPI")
-        if df.empty:
-            st.info("Chưa có dữ liệu.")
-        else:
-            tab1, tab2 = st.tabs(["🏆 KPI Nhân Viên", "📈 Biểu Đồ Tổng Quan"])
-            
-            with tab1:
-                st.subheader("Bảng Xếp Hạng Tuyển Dụng")
-                if 'NguoiTuyen' in df.columns:
-                    kpi = df['NguoiTuyen'].value_counts()
-                    st.bar_chart(kpi)
-                    st.markdown("""
-                        <div class="kpi-box">
-                            <b>💡 Ghi chú:</b> Biểu đồ này hiển thị số lượng hồ sơ mỗi nhân viên đã nhập được.
-                            Dùng để tính thưởng cuối tháng.
-                        </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.warning("Dữ liệu chưa có cột Người Tuyển.")
+    # --- TRANG 5: TÍNH LƯƠNG ---
+    elif st.session_state.current_page == "salary":
+        st.header("🖩 Tính Lương Nhanh")
+        with st.container(border=True):
+            col1, col2 = st.columns(2)
+            lcb = col1.number_input("Lương cơ bản", 4500000)
+            pc = col1.number_input("Phụ cấp", 1000000)
+            ot = col2.number_input("Giờ OT", 40)
+            st.metric("Tổng Thực Nhận Dự Kiến", f"{int(lcb + pc + (lcb/208*ot*1.5)):,} VNĐ")
 
-            with tab2:
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.write("**Nguồn ứng viên**")
-                    st.bar_chart(df['Nguồn'].value_counts())
-                with c2:
-                    st.write("**Trạng thái phỏng vấn**")
-                    st.bar_chart(df['TrangThai'].value_counts())
-
-    # 5. TÍNH LƯƠNG NHANH
-    elif "Tính Lương" in menu:
-        st.header("🖩 Công Cụ Tính Lương")
-        c1, c2 = st.columns(2)
-        with c1:
-            lcb = st.number_input("Lương cơ bản", value=4500000, step=100000)
-            pc = st.number_input("Phụ cấp", value=1000000, step=50000)
-        with c2:
-            ot = st.number_input("Số giờ tăng ca (h)", value=40)
-            hs = st.number_input("Hệ số OT", value=1.5)
-            
-        if st.button("Tính ngay"):
-            tong = lcb + pc + ((lcb/26/8)*ot*hs)
-            st.markdown(f"<div class='salary-result'>💰 Tổng thu nhập: {tong:,.0f} VNĐ</div>", unsafe_allow_html=True)
-
-    # 6. QUẢN TRỊ (ĐÃ KHÔI PHỤC)
-    elif "Quản Trị" in menu:
+    # --- TRANG 6: ADMIN ---
+    elif st.session_state.current_page == "admin":
         st.header("⚙️ Quản Trị Hệ Thống")
         users = sheet_users.get_all_records()
         st.dataframe(users)
-        
-        with st.form("admin_role"):
-            st.write("Cập nhật quyền hạn nhân viên:")
-            u = st.selectbox("Chọn nhân viên", [x['Username'] for x in users])
+        with st.form("edit_role"):
+            u = st.selectbox("Chọn User", [u['Username'] for u in users])
             r = st.selectbox("Quyền mới", ["staff", "admin"])
             if st.form_submit_button("Cập nhật"):
                 cell = sheet_users.find(u)
                 sheet_users.update_cell(cell.row, 3, r)
-                st.success("Đã xong!")
-                time.sleep(1); st.rerun()
+                st.success("Xong!")
 
 # --- RUN ---
 if st.session_state.logged_in:
