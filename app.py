@@ -2,197 +2,287 @@ import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+import io
 from datetime import datetime
 import time
 
 # --- CẤU HÌNH TRANG ---
-st.set_page_config(page_title="Hệ Thống Tuyển Dụng KCN", layout="wide", page_icon="🏭")
+st.set_page_config(page_title="HR Mobile Pro", layout="wide", page_icon="📱")
 
-# --- KẾT NỐI GOOGLE SHEETS ---
-@st.cache_resource
-def connect_to_gsheet():
-    try:
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
-        client = gspread.authorize(creds)
-        sheet = client.open("TuyenDungKCN_Data").sheet1 
-        return sheet
-    except Exception as e:
-        return None
+# --- CẤU HÌNH ID THƯ MỤC DRIVE (ĐÃ CẬP NHẬT CỦA BẠN) ---
+FOLDER_ID_DRIVE = "1Sw91t5o-m8fwZsbGpJw8Yex_WzV8etCx" 
 
-sheet = connect_to_gsheet()
-
-# --- CSS TÙY CHỈNH CHO ĐẸP ---
+# --- CSS BIẾN GIAO DIỆN THÀNH IPHONE STYLE ---
 st.markdown("""
     <style>
-    .main-header {font-size: 30px; font-weight: bold; color: #2E86C1;}
-    .sub-header {font-size: 20px; font-weight: bold; color: #E67E22;}
-    .stAlert {padding: 10px; border-radius: 5px;}
+    .stButton>button {
+        width: 100%;
+        height: 100px;
+        border-radius: 20px;
+        font-size: 20px;
+        font-weight: bold;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        transition: all 0.3s;
+    }
+    .stButton>button:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 15px rgba(0,0,0,0.2);
+    }
+    .app-icon {font-size: 40px; display: block; margin-bottom: 10px;}
+    .profile-pic {border-radius: 50%; width: 100px; height: 100px; object-fit: cover;}
     </style>
 """, unsafe_allow_html=True)
 
-# --- SIDEBAR (MENU TRÁI) ---
-with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/9187/9187555.png", width=80)
-    st.markdown("## 🏭 HR MANAGER PRO")
-    st.markdown("---")
-    
-    menu = st.radio(
-        "MENU CHỨC NĂNG",
-        ["➕ Nhập Hồ Sơ Mới", "📋 Danh Sách & Tìm Kiếm", "📅 Lịch Phỏng Vấn", "📊 Báo Cáo Hiệu Quả"],
-    )
-    
-    st.markdown("---")
-    st.caption("Developed by Gemini AI")
+# --- KẾT NỐI GOOGLE APIS ---
+@st.cache_resource
+def get_gcp_service():
+    try:
+        scope = [
+            "https://spreadsheets.google.com/feeds", 
+            "https://www.googleapis.com/auth/drive"
+        ]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
+        
+        # Client cho Sheet
+        client_sheet = gspread.authorize(creds)
+        
+        # Client cho Drive (Upload ảnh)
+        service_drive = build('drive', 'v3', credentials=creds)
+        
+        return client_sheet, service_drive
+    except Exception as e:
+        return None, None
 
-# --- HÀM TẢI DỮ LIỆU ---
-def load_data():
-    if sheet is None:
-        return pd.DataFrame()
-    data = sheet.get_all_records()
-    return pd.DataFrame(data)
+client, drive_service = get_gcp_service()
 
-df = load_data()
-
-# --- KIỂM TRA LỖI KẾT NỐI ---
-if sheet is None:
-    st.error("⚠️ Lỗi kết nối! Hãy kiểm tra lại phần Secrets trong cài đặt Streamlit.")
+# Kiểm tra kết nối
+if client is None or drive_service is None:
+    st.error("⚠️ Lỗi kết nối Google API! Hãy kiểm tra lại Secrets hoặc file JSON.")
     st.stop()
 
-# ==========================================
-# CHỨC NĂNG 1: NHẬP HỒ SƠ (ĐÃ NÂNG CẤP)
-# ==========================================
-if menu == "➕ Nhập Hồ Sơ Mới":
-    st.markdown('<p class="main-header">📝 Tiếp Nhận Ứng Viên Mới</p>', unsafe_allow_html=True)
-    
-    # Kiểm tra trùng lặp
-    existing_phones = []
-    if not df.empty:
-        existing_phones = df['SDT'].astype(str).tolist()
+try:
+    # Mở sheet theo tên Tab mới
+    sheet_ungvien = client.open("TuyenDungKCN_Data").worksheet("UngVien")
+    sheet_users = client.open("TuyenDungKCN_Data").worksheet("Users")
+except Exception as e:
+    st.error("⚠️ Lỗi không tìm thấy Tab! Hãy chắc chắn file Google Sheet của bạn đã có tab tên là 'UngVien' và 'Users'.")
+    st.stop()
 
-    with st.form("form_add", clear_on_submit=True):
-        st.markdown("### 1. Thông tin cá nhân")
-        c1, c2, c3 = st.columns([2, 1, 1])
-        with c1:
-            name = st.text_input("Họ và tên (*)", placeholder="Nhập tên đầy đủ (Viết hoa)")
-        with c2:
-            phone = st.text_input("Số điện thoại (*)", placeholder="Ví dụ: 0988xxxxxx")
-        with c3:
-            yob = st.number_input("Năm sinh", 1960, 2010, 2000)
+# --- HÀM HỖ TRỢ UPLOAD ẢNH ---
+def upload_to_drive(file_obj, file_name):
+    try:
+        file_metadata = {'name': file_name, 'parents': [FOLDER_ID_DRIVE]}
+        media = MediaIoBaseUpload(file_obj, mimetype=file_obj.type)
+        file = drive_service.files().create(body=file_metadata, media_body=media, fields='id, webContentLink').execute()
+        return file.get('webContentLink') # Trả về link ảnh
+    except Exception as e:
+        st.error(f"Lỗi upload ảnh: {e}")
+        return None
+
+# --- QUẢN LÝ SESSION (TRẠNG THÁI ĐĂNG NHẬP) ---
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.user_role = None
+    st.session_state.user_name = None
+if 'current_page' not in st.session_state:
+    st.session_state.current_page = "Home"
+
+# --- MÀN HÌNH ĐĂNG NHẬP ---
+def login_screen():
+    st.markdown("<h1 style='text-align: center;'>🔐 ĐĂNG NHẬP HỆ THỐNG</h1>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1,2,1])
+    with c2:
+        with st.form("login_form"):
+            username = st.text_input("Tên đăng nhập")
+            password = st.text_input("Mật khẩu", type="password")
+            submitted = st.form_submit_button("Đăng Nhập")
             
-        st.markdown("### 2. Thông tin ứng tuyển")
-        c4, c5, c6 = st.columns(3)
-        with c4:
-            hometown = st.text_input("Quê quán", placeholder="Huyện, Tỉnh")
-        with c5:
-            position = st.selectbox("Vị trí ứng tuyển", 
-                                    ["Công nhân may", "Lắp ráp điện tử", "Kỹ thuật viên", "QC/KCS", "Kho", "Bảo vệ", "Tạp vụ", "Phiên dịch"])
-        with c6:
-            source = st.selectbox("Nguồn ứng viên (Họ biết từ đâu?)", 
-                                  ["Facebook", "Zalo", "Người quen giới thiệu", "Tờ rơi/Băng rôn", "Trực tiếp tại cổng"])
+            if submitted:
+                try:
+                    users = sheet_users.get_all_records()
+                    found = False
+                    for user in users:
+                        if str(user['Username']) == username and str(user['Password']) == password:
+                            st.session_state.logged_in = True
+                            st.session_state.user_role = user['Role']
+                            st.session_state.user_name = user['HoTen']
+                            found = True
+                            st.success("Đăng nhập thành công!")
+                            time.sleep(0.5)
+                            st.rerun()
+                    if not found:
+                        st.error("Sai tên đăng nhập hoặc mật khẩu!")
+                except Exception as e:
+                     st.error("Lỗi đọc dữ liệu Users. Hãy kiểm tra lại file Sheet!")
 
-        st.markdown("### 3. Đánh giá sơ bộ")
-        status = st.selectbox("Trạng thái", ["Mới nhận hồ sơ", "Hẹn phỏng vấn", "Đạt - Chờ đi làm", "Không đạt", "Lưu hồ sơ dự phòng"])
-        note = st.text_area("Ghi chú chi tiết", placeholder="Kinh nghiệm, thái độ, mức lương mong muốn...")
+# --- MÀN HÌNH CHÍNH (IPHONE STYLE) ---
+def home_screen():
+    st.markdown(f"### 👋 Xin chào, {st.session_state.user_name} ({st.session_state.user_role})")
+    if st.button("🚪 Đăng xuất"):
+        st.session_state.logged_in = False
+        st.rerun()
         
-        # Nút bấm lưu
-        submitted = st.form_submit_button("💾 LƯU HỒ SƠ")
+    st.markdown("---")
+    
+    # Giao diện lưới 2 cột
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown('<div class="app-icon">➕</div>', unsafe_allow_html=True)
+        if st.button("NHẬP HỒ SƠ"):
+            st.session_state.current_page = "Input"
+            st.rerun()
+            
+        st.markdown('<div class="app-icon">📊</div>', unsafe_allow_html=True)
+        if st.button("BÁO CÁO"):
+            st.session_state.current_page = "Report"
+            st.rerun()
+
+    with col2:
+        st.markdown('<div class="app-icon">📋</div>', unsafe_allow_html=True)
+        if st.button("DANH SÁCH"):
+            st.session_state.current_page = "List"
+            st.rerun()
+
+        # Chỉ Admin mới thấy nút quản lý nhân viên
+        if st.session_state.user_role == "admin":
+            st.markdown('<div class="app-icon">⚙️</div>', unsafe_allow_html=True)
+            if st.button("QUẢN TRỊ VIÊN"):
+                st.session_state.current_page = "Admin"
+                st.rerun()
+        else:
+            st.markdown('<div class="app-icon">🔒</div>', unsafe_allow_html=True)
+            st.info("Menu Admin")
+
+# --- TRANG NHẬP HỒ SƠ (CÓ ẢNH) ---
+def input_page():
+    if st.button("⬅️ Quay về"):
+        st.session_state.current_page = "Home"
+        st.rerun()
         
-        if submitted:
-            # Logic kiểm tra
+    st.header("📝 Thêm Ứng Viên Mới")
+    
+    with st.form("add_candidate"):
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            # Upload ảnh
+            uploaded_file = st.file_uploader("Ảnh chân dung", type=['png', 'jpg', 'jpeg'])
+            if uploaded_file:
+                st.image(uploaded_file, width=150, caption="Preview")
+        
+        with c2:
+            name = st.text_input("Họ tên (*)")
+            phone = st.text_input("Số điện thoại (*)")
+            yob = st.number_input("Năm sinh", 1980, 2010, 2000)
+            
+        pos = st.selectbox("Vị trí", ["Công nhân", "Kỹ thuật", "Bảo vệ", "Tạp vụ", "Khác"])
+        source = st.selectbox("Nguồn", ["Facebook", "Zalo", "Giới thiệu", "Trực tiếp"])
+        note = st.text_area("Ghi chú")
+        
+        btn = st.form_submit_button("Lưu Hồ Sơ")
+        
+        if btn:
             if not name or not phone:
-                st.error("❌ Vui lòng điền Tên và Số điện thoại!")
-            elif phone in existing_phones:
-                st.warning(f"⚠️ Cảnh báo: Số điện thoại {phone} đã có trong hệ thống! Vui lòng kiểm tra lại danh sách.")
+                st.error("Thiếu tên hoặc SĐT!")
             else:
-                with st.spinner("Đang lưu dữ liệu..."):
-                    row_data = [
-                        datetime.now().strftime("%d/%m/%Y %H:%M"), # Ngày nhập
-                        name.upper(), # Tên viết hoa
-                        yob, hometown, 
-                        f"'{phone}", # Thêm dấu ' để Excel không mất số 0 đầu
-                        position, status, note, source # Thêm cột Nguồn
+                with st.spinner("Đang xử lý ảnh và dữ liệu..."):
+                    image_link = ""
+                    if uploaded_file:
+                        # Upload lên Drive
+                        file_name = f"{name}_{phone}_{datetime.now().strftime('%Y%m%d')}.jpg"
+                        image_link = upload_to_drive(uploaded_file, file_name)
+
+                    # Lưu vào Sheet
+                    row = [
+                        datetime.now().strftime("%d/%m/%Y"),
+                        name, yob, "", f"'{phone}", pos, "Mới nhận", note, source, image_link
                     ]
-                    sheet.append_row(row_data)
-                    st.toast("✅ Đã lưu thành công!", icon="🎉")
+                    sheet_ungvien.append_row(row)
+                    st.success("✅ Đã lưu thành công!")
                     time.sleep(1)
                     st.rerun()
 
-# ==========================================
-# CHỨC NĂNG 2: DANH SÁCH & TÌM KIẾM
-# ==========================================
-elif menu == "📋 Danh Sách & Tìm Kiếm":
-    st.markdown('<p class="main-header">🔍 Tra Cứu Hồ Sơ</p>', unsafe_allow_html=True)
-    
-    if df.empty:
-        st.info("Chưa có dữ liệu.")
-    else:
-        # Thanh tìm kiếm
-        col_search, col_filter_stt = st.columns([2, 1])
-        with col_search:
-            search_term = st.text_input("🔎 Tìm kiếm (Tên hoặc SĐT):")
-        with col_filter_stt:
-            filter_status = st.multiselect("Lọc trạng thái:", df["TrangThai"].unique())
-
-        # Xử lý lọc
-        df_display = df.copy()
-        if search_term:
-            df_display = df_display[df_display.apply(lambda row: row.astype(str).str.contains(search_term, case=False).any(), axis=1)]
-        if filter_status:
-            df_display = df_display[df_display["TrangThai"].isin(filter_status)]
-
-        st.dataframe(df_display, use_container_width=True, height=500)
-        st.caption(f"Hiển thị {len(df_display)} hồ sơ.")
-
-# ==========================================
-# CHỨC NĂNG 3: LỊCH PHỎNG VẤN (TÍNH NĂNG MỚI)
-# ==========================================
-elif menu == "📅 Lịch Phỏng Vấn":
-    st.markdown('<p class="main-header">📅 Danh Sách Chờ Phỏng Vấn</p>', unsafe_allow_html=True)
+# --- TRANG DANH SÁCH (CÓ HIỆN ẢNH) ---
+def list_page():
+    if st.button("⬅️ Quay về"):
+        st.session_state.current_page = "Home"
+        st.rerun()
+        
+    st.header("📋 Danh Sách Hồ Sơ")
+    data = sheet_ungvien.get_all_records()
+    df = pd.DataFrame(data)
     
     if not df.empty:
-        # Lọc ra những người có trạng thái là "Hẹn phỏng vấn" hoặc "Mới nhận"
-        df_interview = df[df["TrangThai"].isin(["Hẹn phỏng vấn", "Mới nhận hồ sơ"])]
+        search = st.text_input("Tìm kiếm (Tên/SĐT)...")
+        if search:
+            df = df[df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
         
-        col1, col2 = st.columns(2)
-        col1.metric("Cần phỏng vấn", f"{len(df_interview)} người")
-        
-        st.write("Dưới đây là danh sách những người cần xử lý:")
-        for index, row in df_interview.iterrows():
-            with st.expander(f"📌 {row['HoTen']} - {row['ViTri']}"):
-                st.write(f"📞 **SĐT:** {row['SDT']}")
-                st.write(f"🏠 **Quê quán:** {row['QueQuan']}")
-                st.write(f"📝 **Ghi chú:** {row['GhiChu']}")
-                st.info(f"Nguồn: {row.get('Nguồn', 'Không rõ')}") # Xử lý nếu chưa có cột Nguồn cũ
+        # Hiển thị dạng Card đẹp thay vì bảng
+        for i, row in df.iterrows():
+            with st.expander(f"{row['HoTen']} - {row['ViTri']}"):
+                c_img, c_info = st.columns([1, 3])
+                with c_img:
+                    if row.get('LinkAnh'):
+                        st.image(row['LinkAnh'], width=100)
+                    else:
+                        st.write("📷 Không có ảnh")
+                with c_info:
+                    st.write(f"📞 **SĐT:** {row['SDT']}")
+                    st.write(f"🏷️ **Trạng thái:** {row['TrangThai']}")
+                    st.write(f"ℹ️ **Nguồn:** {row.get('Nguồn', '')}")
+                    if row.get('GhiChu'):
+                         st.info(f"Note: {row['GhiChu']}")
 
-# ==========================================
-# CHỨC NĂNG 4: BÁO CÁO HIỆU QUẢ
-# ==========================================
-elif menu == "📊 Báo Cáo Hiệu Quả":
-    st.markdown('<p class="main-header">📊 Dashboard Tuyển Dụng</p>', unsafe_allow_html=True)
+# --- TRANG QUẢN LÝ USER (CHỈ ADMIN) ---
+def admin_page():
+    if st.button("⬅️ Quay về"):
+        st.session_state.current_page = "Home"
+        st.rerun()
     
-    if not df.empty:
-        # KPI Cards
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Tổng hồ sơ", len(df))
-        c2.metric("Đạt yêu cầu", len(df[df["TrangThai"].str.contains("Đạt")]))
-        c3.metric("Tỉ lệ chuyển đổi", f"{round(len(df[df['TrangThai'].str.contains('Đạt')]) / len(df) * 100, 1)}%")
-        c4.metric("Chờ phỏng vấn", len(df[df["TrangThai"] == "Hẹn phỏng vấn"]))
-        
-        st.markdown("---")
-        
-        # Biểu đồ
-        col_chart1, col_chart2 = st.columns(2)
-        
-        with col_chart1:
-            st.subheader("Tỉ lệ theo Vị trí")
-            st.bar_chart(df["ViTri"].value_counts())
+    st.header("⚙️ Quản Lý Tài Khoản Nhân Viên")
+    
+    # Tạo user mới
+    with st.form("new_user"):
+        st.write("Tạo tài khoản mới:")
+        c1, c2 = st.columns(2)
+        with c1:
+            u_user = st.text_input("Username (Tên đăng nhập)")
+            u_name = st.text_input("Tên nhân viên")
+        with c2:
+            u_pass = st.text_input("Password (Mật khẩu)")
+            u_role = st.selectbox("Phân quyền", ["staff", "admin"])
             
-        with col_chart2:
-            # Kiểm tra xem có cột Nguồn không để vẽ biểu đồ
-            if "Nguồn" in df.columns: # Giả sử tên cột trong Excel bạn sẽ đặt là 'Nguồn' (nếu chưa có thì lần nhập tới sẽ tự có)
-                st.subheader("Hiệu quả kênh tuyển dụng")
-                st.bar_chart(df["Nguồn"].value_counts())
+        if st.form_submit_button("Thêm nhân viên"):
+            if u_user and u_pass:
+                sheet_users.append_row([u_user, u_pass, u_role, u_name])
+                st.success("Đã thêm thành công!")
+                time.sleep(1)
+                st.rerun()
             else:
-                st.subheader("Phân bổ Trạng thái")
-                st.bar_chart(df["TrangThai"].value_counts())
+                st.error("Vui lòng điền đủ thông tin")
+
+    # Xem danh sách user
+    st.subheader("Danh sách hiện tại:")
+    users = sheet_users.get_all_records()
+    st.dataframe(pd.DataFrame(users))
+
+# --- LOGIC ĐIỀU HƯỚNG CHÍNH ---
+if not st.session_state.logged_in:
+    login_screen()
+else:
+    if st.session_state.current_page == "Home":
+        home_screen()
+    elif st.session_state.current_page == "Input":
+        input_page()
+    elif st.session_state.current_page == "List":
+        list_page()
+    elif st.session_state.current_page == "Report":
+        st.title("📊 Báo cáo")
+        st.info("Tính năng đang được cập nhật thêm biểu đồ...")
+        if st.button("⬅️ Quay về"):
+            st.session_state.current_page = "Home"
+            st.rerun()
+    elif st.session_state.current_page == "Admin":
+        admin_page()
