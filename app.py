@@ -10,7 +10,7 @@ import requests
 import base64
 
 # --- CẤU HÌNH ---
-st.set_page_config(page_title="HR System Pro", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="HR System Pro", layout="wide", page_icon="💎")
 
 # Link Apps Script của bạn (Đã điền sẵn)
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzKueqCnPonJ1MsFzQpQDk7ihgnVVQyNHMUyc_dx6AocsDu1jW1zf6Gr9VgqMD4D00/exec"
@@ -25,12 +25,13 @@ st.markdown("""
         box-shadow: 0 1px 3px rgba(0,0,0,0.1); text-align: left; padding-left: 15px; margin-bottom: 5px;
     }
     [data-testid="stSidebar"] .stButton > button:hover {background-color: #e3f2fd; color: #1565c0;}
-    .metric-container {display: flex; gap: 15px; margin-bottom: 20px;}
-    .metric-card {
-        background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); 
-        flex: 1; text-align: center; border-top: 5px solid #1976D2;
+    
+    /* Style cho link tải ảnh */
+    .download-link {
+        display: inline-block; padding: 5px 10px; background-color: #4CAF50; color: white !important; 
+        text-decoration: none; border-radius: 4px; font-size: 12px; margin-top: 5px;
     }
-    .metric-val { font-size: 32px; font-weight: 800; color: #333; }
+    .download-link:hover {background-color: #45a049;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -57,7 +58,7 @@ try:
     except: sheet_templates = None
 except: st.error("⚠️ Không tìm thấy file Excel."); st.stop()
 
-# --- HÀM UPLOAD ---
+# --- CÁC HÀM HỖ TRỢ XỬ LÝ ẢNH ---
 def upload_via_appsscript(file_obj, file_name):
     try:
         file_bytes = file_obj.getvalue()
@@ -69,6 +70,14 @@ def upload_via_appsscript(file_obj, file_name):
             if res_json.get("result") == "success": return res_json.get("link")
     except: pass
     return None
+
+def convert_drive_link(link):
+    """Chuyển link Drive thường thành link xem trực tiếp (Thumbnail High Res)"""
+    if "id=" in link:
+        file_id = link.split("id=")[1]
+        # Link này Google cho phép load ảnh nhanh và không bị chặn
+        return f"https://drive.google.com/thumbnail?id={file_id}&sz=w1000" 
+    return link
 
 def generate_qr(data):
     qr = qrcode.QRCode(version=1, box_size=10, border=5)
@@ -131,20 +140,19 @@ def main_app():
     if st.session_state.current_page == "dashboard":
         st.title("📊 Tổng Quan")
         if not df.empty:
-            st.markdown(f"""
-            <div class="metric-container">
-                <div class="metric-card" style="border-top-color: #2196F3;"><div class="metric-val">{len(df)}</div><div>Tổng Hồ Sơ</div></div>
-                <div class="metric-card" style="border-top-color: #4CAF50;"><div class="metric-val">{len(df[df['TrangThai']=='Đã đi làm'])}</div><div>Đã Đi Làm</div></div>
-                <div class="metric-card" style="border-top-color: #FF9800;"><div class="metric-val">{len(df[df['TrangThai']=='Mới nhận'])}</div><div>Mới Nhận</div></div>
-            </div>""", unsafe_allow_html=True)
-            c1, c2 = st.columns([2, 1])
-            with c1: 
+            c1, c2, c3 = st.columns(3)
+            with c1: st.metric("Tổng Hồ Sơ", len(df))
+            with c2: st.metric("Đã Đi Làm", len(df[df['TrangThai']=='Đã đi làm']))
+            with c3: st.metric("Mới Nhận", len(df[df['TrangThai']=='Mới nhận']))
+            st.markdown("---")
+            c4, c5 = st.columns([2, 1])
+            with c4: 
                 st.subheader("🏆 Top Tuyển Dụng")
                 if 'NguoiTuyen' in df.columns: st.bar_chart(df['NguoiTuyen'].value_counts())
-            with c2: 
+            with c5: 
                 st.subheader("🎯 Nguồn"); st.dataframe(df['Nguồn'].value_counts(), use_container_width=True)
 
-    # 2. NHẬP LIỆU (UPLOAD SCRIPT)
+    # 2. NHẬP LIỆU
     elif st.session_state.current_page == "input":
         st.header("📝 Nhập Hồ Sơ")
         with st.form("input_form"):
@@ -187,36 +195,41 @@ def main_app():
                         st.success("✅ Thành công!"); time.sleep(1); st.rerun()
                 else: st.error("Thiếu thông tin!")
 
-    # 3. DANH SÁCH (HIỆN ẢNH NHANH)
+    # 3. DANH SÁCH (ẢNH + TẢI VỀ)
     elif st.session_state.current_page == "list":
         st.header("🔍 Tra Cứu")
         if not df.empty:
             search = st.text_input("🔎 Tìm kiếm:")
             df_show = df[df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)] if search else df
             
-            # Hiển thị bảng
+            # Bảng tổng quan
             st.dataframe(df_show[['HoTen', 'SDT', 'ViTri', 'TrangThai']], use_container_width=True, hide_index=True)
             
-            st.write("---")
             st.write("### Chi tiết hồ sơ:")
             for i, row in df_show.iterrows():
                 with st.container(border=True):
                     c1, c2 = st.columns([1, 4])
                     with c1:
-                        # Logic hiển thị ảnh mạnh mẽ hơn
-                        if row.get('LinkAnh') and str(row['LinkAnh']).startswith('http'):
-                            st.image(row['LinkAnh'], width=120)
+                        # LOGIC HIỂN THỊ ẢNH MỚI
+                        raw_link = str(row.get('LinkAnh', ''))
+                        if raw_link and raw_link.startswith('http'):
+                            # 1. Hiển thị ảnh (dùng link thumbnail cho nhanh)
+                            thumb_link = convert_drive_link(raw_link)
+                            st.image(thumb_link, width=120)
+                            
+                            # 2. Nút tải về (Dùng link gốc)
+                            st.markdown(f'<a href="{raw_link}" target="_blank" class="download-link">📥 Tải ảnh gốc</a>', unsafe_allow_html=True)
                         else:
-                            st.info("🚫 No Image")
+                            st.info("No Image")
+                            
                     with c2:
                         st.markdown(f"#### {row['HoTen']} ({row['NamSinh']})")
-                        st.caption(f"Vị trí: {row['ViTri']} | Trạng thái: {row['TrangThai']}")
-                        st.write(f"📞 **{row['SDT']}** | 🆔 {row.get('CCCD')}")
+                        st.write(f"📞 {row['SDT']} | 🆔 {row.get('CCCD')}")
                         st.write(f"🏠 {row['QueQuan']}")
 
-    # 4. KHO ẢNH
+    # 4. KHO ẢNH (ẢNH + TẢI VỀ)
     elif st.session_state.current_page == "storage" and sheet_storage:
-        st.header("🖼️ Kho Ảnh")
+        st.header("🖼️ Kho Ảnh Marketing")
         with st.form("up_store"):
             f = st.file_uploader("Upload ảnh"); t = st.text_input("Tên ảnh"); n = st.text_area("Ghi chú")
             if st.form_submit_button("Lưu"):
@@ -232,8 +245,15 @@ def main_app():
             for idx, d in enumerate(data):
                 with cols[idx%3]:
                     with st.container(border=True):
-                        if d.get('LinkAnh'): st.image(d['LinkAnh'], use_container_width=True)
-                        st.caption(d['TenAnh'])
+                        raw_link = d.get('LinkAnh', '')
+                        if raw_link: 
+                            thumb_link = convert_drive_link(raw_link)
+                            st.image(thumb_link, use_container_width=True)
+                            st.markdown(f"**{d['TenAnh']}**")
+                            # Link tải về
+                            st.markdown(f'<a href="{raw_link}" target="_blank" class="download-link">📥 Tải về máy</a>', unsafe_allow_html=True)
+                            
+                        with st.expander("Ghi chú"): st.write(d.get('GhiChu'))
 
     # 5. MẪU CONTENT
     elif st.session_state.current_page == "templates" and sheet_templates:
