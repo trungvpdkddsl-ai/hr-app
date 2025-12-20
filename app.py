@@ -10,9 +10,10 @@ import qrcode
 from io import BytesIO
 
 # --- CẤU HÌNH TRANG ---
-st.set_page_config(page_title="HR Admin Pro", layout="wide", page_icon="🗂️")
+st.set_page_config(page_title="HR Admin Pro", layout="wide", page_icon="🚀")
 
 # --- CẤU HÌNH ID DRIVE ---
+# Hãy đảm bảo bạn đã Share thư mục này quyền EDITOR cho email của Bot
 FOLDER_ID_DRIVE = "1Sw91t5o-m8fwZsbGpJw8Yex_WzV8etCx"
 
 # --- CSS GIAO DIỆN ---
@@ -42,17 +43,9 @@ st.markdown("""
     .metric-val { font-size: 28px; font-weight: bold; color: #333; }
     .metric-lbl { font-size: 14px; color: #666; text-transform: uppercase; }
 
-    /* SOCIAL BUTTONS */
-    .social-btn {
-        display: inline-block; padding: 3px 8px; border-radius: 4px; color: white !important;
-        text-decoration: none; font-size: 11px; margin-right: 4px; font-weight: bold;
-    }
-    .zalo {background-color: #0068FF;} .fb {background-color: #1877F2;} .tiktok {background-color: #000000;}
-    
-    /* GALLERY STYLE */
-    .gallery-card {
-        background: white; padding: 10px; border-radius: 8px; 
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px;
+    /* COPY BOX STYLE */
+    .copy-box {
+        background-color: #f1f8e9; border: 1px dashed #4caf50; padding: 15px; border-radius: 8px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -66,19 +59,19 @@ def get_gcp_service():
         client = gspread.authorize(creds)
         service_drive = build('drive', 'v3', credentials=creds)
         return client, service_drive
-    except: return None, None
+    except Exception as e: return None, None
 
 client, drive_service = get_gcp_service()
-if not client: st.error("⚠️ Lỗi kết nối!"); st.stop()
+if not client: st.error("⚠️ Lỗi kết nối API Google!"); st.stop()
 
 # KẾT NỐI CÁC SHEET
 try:
     sheet_ungvien = client.open("TuyenDungKCN_Data").worksheet("UngVien")
     sheet_users = client.open("TuyenDungKCN_Data").worksheet("Users")
-    # Kết nối thêm sheet Kho Ảnh mới
     sheet_storage = client.open("TuyenDungKCN_Data").worksheet("KhoAnh")
+    sheet_templates = client.open("TuyenDungKCN_Data").worksheet("MauBai")
 except: 
-    st.error("⚠️ Lỗi: Không tìm thấy Sheet! Hãy chắc chắn bạn đã tạo Tab tên là 'KhoAnh'.")
+    st.error("⚠️ Lỗi: Không tìm thấy Sheet! Hãy kiểm tra lại file Excel (Đã tạo tab 'MauBai' chưa?).")
     st.stop()
 
 # --- HELPER FUNCTIONS ---
@@ -88,7 +81,9 @@ def upload_to_drive(file_obj, file_name):
         media = MediaIoBaseUpload(file_obj, mimetype=file_obj.type)
         file = drive_service.files().create(body=metadata, media_body=media, fields='webContentLink').execute()
         return file.get('webContentLink')
-    except: return None
+    except Exception as e:
+        st.error(f"Chi tiết lỗi Upload: {e}") # Hiện lỗi chi tiết để debug
+        return None
 
 def generate_qr(data):
     qr = qrcode.QRCode(version=1, box_size=10, border=5)
@@ -104,27 +99,49 @@ if 'current_page' not in st.session_state: st.session_state.current_page = "dash
 def set_page(page_name):
     st.session_state.current_page = page_name
 
-# --- LOGIN SCREEN ---
+# --- LOGIN SCREEN (ĐÃ KHÔI PHỤC ĐĂNG KÝ) ---
 def login_screen():
-    st.markdown("<br><h1 style='text-align: center; color:#0d47a1'>🔐 HR ADMIN PRO</h1>", unsafe_allow_html=True)
+    st.markdown("<br><h1 style='text-align: center; color:#0d47a1'>🔐 HỆ THỐNG TUYỂN DỤNG</h1>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1,1,1])
     with c2:
-        with st.form("login"):
-            u = st.text_input("Tên đăng nhập")
-            p = st.text_input("Mật khẩu", type="password")
-            if st.form_submit_button("ĐĂNG NHẬP", use_container_width=True):
-                users = sheet_users.get_all_records()
-                for user in users:
-                    if str(user['Username']) == u and str(user['Password']) == p:
-                        st.session_state.logged_in = True
-                        st.session_state.user_role = user['Role']
-                        st.session_state.user_name = user['HoTen']
-                        st.rerun()
-                st.error("Sai thông tin!")
+        tab1, tab2 = st.tabs(["🔑 ĐĂNG NHẬP", "📝 ĐĂNG KÝ MỚI"])
+        
+        # TAB ĐĂNG NHẬP
+        with tab1:
+            with st.form("login"):
+                u = st.text_input("Tên đăng nhập")
+                p = st.text_input("Mật khẩu", type="password")
+                if st.form_submit_button("VÀO HỆ THỐNG", use_container_width=True):
+                    users = sheet_users.get_all_records()
+                    found = False
+                    for user in users:
+                        if str(user['Username']) == u and str(user['Password']) == p:
+                            st.session_state.logged_in = True
+                            st.session_state.user_role = user['Role']
+                            st.session_state.user_name = user['HoTen']
+                            found = True
+                            st.rerun()
+                    if not found: st.error("Sai tài khoản hoặc mật khẩu!")
+
+        # TAB ĐĂNG KÝ
+        with tab2:
+            with st.form("register"):
+                new_u = st.text_input("Tên đăng nhập mới (*)")
+                new_p = st.text_input("Mật khẩu (*)", type="password")
+                new_n = st.text_input("Họ và tên của bạn (*)")
+                if st.form_submit_button("TẠO TÀI KHOẢN", use_container_width=True):
+                    if new_u and new_p and new_n:
+                        existing = sheet_users.col_values(1)
+                        if new_u in existing:
+                            st.warning("Tên đăng nhập đã tồn tại!")
+                        else:
+                            sheet_users.append_row([new_u, new_p, "staff", new_n])
+                            st.success("✅ Đăng ký thành công! Hãy quay lại tab Đăng Nhập.")
+                    else:
+                        st.error("Vui lòng điền đủ thông tin!")
 
 # --- MAIN APP ---
 def main_app():
-    # Load data Ung Vien
     df = pd.DataFrame(sheet_ungvien.get_all_records())
 
     # --- SIDEBAR MENU ---
@@ -136,9 +153,9 @@ def main_app():
         if st.button("🏠 TỔNG QUAN SYSTEM"): set_page("dashboard")
         if st.button("📝 NHẬP HỒ SƠ MỚI"): set_page("input")
         if st.button("🔍 LỌC & DANH SÁCH"): set_page("list")
-        
-        # Nút mới: KHO ẢNH
         if st.button("📂 KHO ẢNH MEDIA"): set_page("storage")
+        # Nút mới
+        if st.button("📋 MẪU BÀI ĐĂNG"): set_page("templates")
         
         if st.session_state.user_role == "admin":
             st.markdown("---")
@@ -147,11 +164,9 @@ def main_app():
         st.markdown("<br><br>", unsafe_allow_html=True)
         if st.button("🚪 Đăng xuất"): st.session_state.logged_in = False; st.rerun()
 
-    # --- PAGE 1: DASHBOARD ---
+    # --- PAGE: DASHBOARD ---
     if st.session_state.current_page == "dashboard":
         st.title("📊 Bảng Điều Khiển Trung Tâm")
-        st.markdown(f"Dữ liệu cập nhật: {datetime.now().strftime('%d/%m/%Y')}")
-        
         if not df.empty:
             st.markdown("""
             <div class="metric-container">
@@ -172,15 +187,15 @@ def main_app():
             
             c1, c2 = st.columns([2, 1])
             with c1:
-                st.subheader("🏆 Top Nhân Viên")
+                st.subheader("🏆 Top Tuyển Dụng")
                 if 'NguoiTuyen' in df.columns: st.bar_chart(df['NguoiTuyen'].value_counts())
             with c2:
                 st.subheader("🎯 Nguồn Ứng Viên")
                 st.dataframe(df['Nguồn'].value_counts(), use_container_width=True)
 
-    # --- PAGE 2: NHẬP LIỆU ---
+    # --- PAGE: NHẬP LIỆU ---
     elif st.session_state.current_page == "input":
-        st.header("📝 Nhập Hồ Sơ Ứng Viên Mới")
+        st.header("📝 Nhập Hồ Sơ Ứng Viên")
         with st.container(border=True):
             with st.form("input_form"):
                 c_img, c_info = st.columns([1, 3])
@@ -212,7 +227,7 @@ def main_app():
                 if st.form_submit_button("LƯU HỒ SƠ NGAY", type="primary"):
                     if name and phone and cccd:
                          if not df.empty and str(cccd) in df['CCCD'].astype(str).values:
-                             st.warning("⚠️ Trùng CCCD! Người này đã có trong hệ thống.")
+                             st.warning("⚠️ Trùng CCCD!")
                          else:
                              with st.spinner("Đang lưu..."):
                                  link = upload_to_drive(uploaded_file, f"{name}.jpg") if uploaded_file else ""
@@ -223,10 +238,10 @@ def main_app():
                                      link, bus, ktx, st.session_state.user_name, fb, tt, doc
                                  ]
                                  sheet_ungvien.append_row(row)
-                                 st.success("✅ Đã lưu thành công!"); time.sleep(1); st.rerun()
-                    else: st.error("Vui lòng điền đủ Tên, SĐT và CCCD!")
+                                 st.success("✅ Đã lưu!"); time.sleep(1); st.rerun()
+                    else: st.error("Điền thiếu thông tin!")
 
-    # --- PAGE 3: DANH SÁCH ---
+    # --- PAGE: DANH SÁCH ---
     elif st.session_state.current_page == "list":
         st.header("🔍 Tra Cứu & Lọc Hồ Sơ")
         if not df.empty:
@@ -241,7 +256,6 @@ def main_app():
             if filter_pos: df_filtered = df_filtered[df_filtered['ViTri'].isin(filter_pos)]
             if search_query: df_filtered = df_filtered[df_filtered.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)]
 
-            st.markdown(f"**👉 Tìm thấy: {len(df_filtered)} hồ sơ**")
             st.dataframe(df_filtered[['HoTen', 'NamSinh', 'SDT', 'ViTri', 'TrangThai']], use_container_width=True, hide_index=True)
             
             st.markdown("---")
@@ -253,73 +267,81 @@ def main_app():
                         st.image(generate_qr(f"{row['HoTen']}"), width=80)
                     with ec2:
                         st.write(f"📅 {row['NamSinh']} | 📞 {row['SDT']} | 🆔 {row.get('CCCD')}")
-                        st.write(f"🏠 {row['QueQuan']}")
                         if row.get('LinkFB'): st.markdown(f"🌐 [Facebook]({row['LinkFB']})")
                     with ec3:
                          st.info(f"Nguồn: {row['Nguồn']}")
 
-    # --- PAGE 4: KHO ẢNH (TÍNH NĂNG MỚI) ---
+    # --- PAGE: KHO ẢNH ---
     elif st.session_state.current_page == "storage":
-        st.header("📂 Kho Ảnh Marketing (Facebook/Zalo)")
-        st.caption("Nơi lưu trữ banner, hình ảnh hoạt động công ty để đăng bài tuyển dụng.")
+        st.header("📂 Kho Ảnh Marketing")
         
-        # 1. Upload ảnh mới
         with st.expander("⬆️ Tải ảnh mới lên Kho", expanded=False):
             with st.form("upload_storage"):
                 c1, c2 = st.columns([1, 2])
                 with c1:
                     img_file = st.file_uploader("Chọn ảnh", type=['jpg', 'png', 'jpeg'])
                 with c2:
-                    img_name = st.text_input("Tên gợi nhớ (VD: Banner T8, Anh du lich he...)")
-                    img_note = st.text_area("Ghi chú (Nội dung đăng bài...)")
+                    img_name = st.text_input("Tên gợi nhớ")
+                    img_note = st.text_area("Ghi chú nội dung")
                 
                 if st.form_submit_button("Lưu vào Kho"):
                     if img_file and img_name:
                         with st.spinner("Đang tải lên..."):
-                            # Thêm tiền tố MKT_ để phân biệt trên Drive
-                            file_path = f"MKT_{img_name}_{datetime.now().strftime('%Y%m%d')}.jpg"
-                            link = upload_to_drive(img_file, file_path)
-                            
+                            link = upload_to_drive(img_file, f"MKT_{img_name}_{datetime.now().strftime('%Y%m%d')}.jpg")
                             if link:
-                                # Lưu vào sheet KhoAnh
-                                sheet_storage.append_row([
-                                    datetime.now().strftime("%d/%m/%Y"),
-                                    img_name,
-                                    link,
-                                    img_note
-                                ])
-                                st.success("✅ Đã lưu ảnh thành công!")
-                                time.sleep(1); st.rerun()
+                                sheet_storage.append_row([datetime.now().strftime("%d/%m/%Y"), img_name, link, img_note])
+                                st.success("✅ Thành công!"); time.sleep(1); st.rerun()
                             else:
-                                st.error("Lỗi upload Drive!")
-                    else:
-                        st.warning("Vui lòng chọn ảnh và đặt tên!")
+                                st.error("Lỗi Upload: Không lấy được link.")
+                    else: st.warning("Thiếu ảnh hoặc tên!")
 
-        # 2. Hiển thị Gallery
         st.markdown("---")
         try:
-            storage_data = sheet_storage.get_all_records()
-            df_store = pd.DataFrame(storage_data)
-            
+            df_store = pd.DataFrame(sheet_storage.get_all_records())
             if not df_store.empty:
-                # Hiển thị dạng lưới 3 cột
                 cols = st.columns(3)
                 for idx, row in df_store.iterrows():
-                    with cols[idx % 3]: # Chia đều vào 3 cột
+                    with cols[idx % 3]:
                         with st.container(border=True):
-                            if row.get('LinkAnh'):
-                                st.image(row['LinkAnh'], use_container_width=True)
+                            if row.get('LinkAnh'): st.image(row['LinkAnh'], use_container_width=True)
                             st.markdown(f"**{row['TenAnh']}**")
-                            st.caption(f"📅 {row['NgayUp']}")
-                            with st.expander("Xem nội dung"):
-                                st.write(row['GhiChu'])
-                                st.code(row['LinkAnh'], language="text") # Để copy link nhanh
-            else:
-                st.info("Kho ảnh đang trống. Hãy tải ảnh đầu tiên lên!")
-        except Exception as e:
-            st.error("Chưa có dữ liệu hoặc lỗi đọc Sheet 'KhoAnh'.")
+                            with st.expander("Copy nội dung"):
+                                st.code(row['GhiChu'], language='text')
+            else: st.info("Kho ảnh trống.")
+        except: st.error("Lỗi đọc sheet KhoAnh.")
 
-    # --- PAGE 5: ADMIN ---
+    # --- PAGE: MẪU BÀI ĐĂNG (TÍNH NĂNG MỚI) ---
+    elif st.session_state.current_page == "templates":
+        st.header("📋 Kho Mẫu Bài Đăng Tuyển Dụng")
+        st.caption("Lưu trữ các mẫu content hay để copy nhanh.")
+        
+        # Thêm mẫu mới
+        with st.expander("➕ Thêm mẫu bài viết mới"):
+            with st.form("add_template"):
+                t_title = st.text_input("Tiêu đề (VD: Bài đăng tuyển nam kho)")
+                t_content = st.text_area("Nội dung bài viết", height=150)
+                if st.form_submit_button("Lưu Mẫu"):
+                    if t_title and t_content:
+                        sheet_templates.append_row([t_title, t_content, datetime.now().strftime("%d/%m/%Y")])
+                        st.success("Đã lưu!"); time.sleep(1); st.rerun()
+        
+        st.markdown("---")
+        # Hiển thị danh sách mẫu
+        try:
+            tpl_data = sheet_templates.get_all_records()
+            if tpl_data:
+                for tpl in tpl_data:
+                    with st.container(border=True):
+                        st.subheader(f"📌 {tpl['TieuDe']}")
+                        st.caption(f"Ngày tạo: {tpl['NgayTao']}")
+                        # Dùng st.code để có nút copy ở góc
+                        st.code(tpl['NoiDung'], language='text')
+            else:
+                st.info("Chưa có mẫu bài đăng nào.")
+        except:
+            st.error("Chưa tìm thấy sheet 'MauBai'. Hãy tạo sheet này trước!")
+
+    # --- PAGE: ADMIN ---
     elif st.session_state.current_page == "admin":
         st.header("⚙️ Quản Trị Hệ Thống")
         users = sheet_users.get_all_records()
