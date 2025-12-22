@@ -12,7 +12,7 @@ import base64
 # --- CẤU HÌNH ---
 st.set_page_config(page_title="HR System Pro", layout="wide", page_icon="💎")
 
-# Link Apps Script của bạn (Đã điền sẵn)
+# Link Apps Script của bạn
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzKueqCnPonJ1MsFzQpQDk7ihgnVVQyNHMUyc_dx6AocsDu1jW1zf6Gr9VgqMD4D00/exec"
 
 # --- CSS GIAO DIỆN ---
@@ -48,15 +48,11 @@ def get_gcp_service():
 client = get_gcp_service()
 if not client: st.error("⚠️ Lỗi kết nối Secrets!"); st.stop()
 
-# MỞ SHEET
+# MỞ SHEET (Đã bỏ KhoAnh và MauBai)
 try:
     sheet_ungvien = client.open("TuyenDungKCN_Data").worksheet("UngVien")
     sheet_users = client.open("TuyenDungKCN_Data").worksheet("Users")
-    try: sheet_storage = client.open("TuyenDungKCN_Data").worksheet("KhoAnh")
-    except: sheet_storage = None
-    try: sheet_templates = client.open("TuyenDungKCN_Data").worksheet("MauBai")
-    except: sheet_templates = None
-except: st.error("⚠️ Không tìm thấy file Excel."); st.stop()
+except: st.error("⚠️ Không tìm thấy file Excel hoặc Sheet UngVien/Users."); st.stop()
 
 # --- CÁC HÀM HỖ TRỢ XỬ LÝ ẢNH ---
 def upload_via_appsscript(file_obj, file_name):
@@ -75,7 +71,6 @@ def convert_drive_link(link):
     """Chuyển link Drive thường thành link xem trực tiếp (Thumbnail High Res)"""
     if "id=" in link:
         file_id = link.split("id=")[1]
-        # Link này Google cho phép load ảnh nhanh và không bị chặn
         return f"https://drive.google.com/thumbnail?id={file_id}&sz=w1000" 
     return link
 
@@ -127,9 +122,9 @@ def main_app():
         if st.button("🏠 DASHBOARD"): set_page("dashboard")
         if st.button("📝 NHẬP HỒ SƠ"): set_page("input")
         if st.button("🔍 DANH SÁCH"): set_page("list")
-        if st.button("📋 MẪU CONTENT"): set_page("templates")
-        if sheet_storage:
-            if st.button("🖼️ KHO ẢNH"): set_page("storage")
+        
+        # Đã bỏ nút Mẫu Content và Kho Ảnh ở đây
+
         if st.session_state.user_role == "admin":
             st.markdown("---"); 
             if st.button("⚙️ QUẢN TRỊ"): set_page("admin")
@@ -152,7 +147,7 @@ def main_app():
             with c5: 
                 st.subheader("🎯 Nguồn"); st.dataframe(df['Nguồn'].value_counts(), use_container_width=True)
 
-    # 2. NHẬP LIỆU
+    # 2. NHẬP LIỆU (Đã sửa logic CCCD)
     elif st.session_state.current_page == "input":
         st.header("📝 Nhập Hồ Sơ")
         with st.form("input_form"):
@@ -162,7 +157,7 @@ def main_app():
             with col_info:
                 name = st.text_input("Họ tên (*)")
                 phone = st.text_input("SĐT (*)")
-                cccd = st.text_input("CCCD (*)")
+                cccd = st.text_input("CCCD") # Đã bỏ dấu (*)
 
             r1, r2, r3 = st.columns(3)
             dob = r1.date_input("Ngày sinh", value=date(2000, 1, 1), min_value=date(1960, 1, 1))
@@ -181,19 +176,21 @@ def main_app():
             ktx = r8.selectbox("Ký túc xá", ["Không", "Có"])
 
             if st.form_submit_button("LƯU HỒ SƠ", type="primary"):
-                if name and phone and cccd:
+                # Chỉ kiểm tra Tên và SĐT
+                if name and phone: 
                     with st.spinner("Đang xử lý ảnh..."):
                         final_link = img_link_backup 
                         if uploaded_file:
                             link_drive = upload_via_appsscript(uploaded_file, f"{name}_{phone}.jpg")
                             if link_drive: final_link = link_drive
                         
+                        # Vẫn lưu cccd vào sheet nhưng có thể là chuỗi rỗng
                         row = [datetime.now().strftime("%d/%m/%Y"), name.upper(), dob.strftime("%d/%m/%Y"), hometown, 
                                f"'{phone}", f"'{cccd}", pos, "Mới nhận", "", source, final_link, bus, ktx, 
                                st.session_state.user_name, fb, tt, doc]
                         sheet_ungvien.append_row(row)
                         st.success("✅ Thành công!"); time.sleep(1); st.rerun()
-                else: st.error("Thiếu thông tin!")
+                else: st.error("Vui lòng nhập Tên và SĐT!")
 
     # 3. DANH SÁCH (ẢNH + TẢI VỀ)
     elif st.session_state.current_page == "list":
@@ -224,48 +221,10 @@ def main_app():
                             
                     with c2:
                         st.markdown(f"#### {row['HoTen']} ({row['NamSinh']})")
-                        st.write(f"📞 {row['SDT']} | 🆔 {row.get('CCCD')}")
+                        st.write(f"📞 {row['SDT']} | 🆔 {row.get('CCCD', 'Chưa có')}")
                         st.write(f"🏠 {row['QueQuan']}")
 
-    # 4. KHO ẢNH (ẢNH + TẢI VỀ)
-    elif st.session_state.current_page == "storage" and sheet_storage:
-        st.header("🖼️ Kho Ảnh Marketing")
-        with st.form("up_store"):
-            f = st.file_uploader("Upload ảnh"); t = st.text_input("Tên ảnh"); n = st.text_area("Ghi chú")
-            if st.form_submit_button("Lưu"):
-                if f and t:
-                    with st.spinner("Uploading..."):
-                        l = upload_via_appsscript(f, f"MKT_{t}.jpg")
-                        if l: sheet_storage.append_row([datetime.now().strftime("%d/%m/%Y"), t, l, n]); st.success("OK!"); st.rerun()
-        
-        st.markdown("---")
-        data = sheet_storage.get_all_records()
-        if data:
-            cols = st.columns(3)
-            for idx, d in enumerate(data):
-                with cols[idx%3]:
-                    with st.container(border=True):
-                        raw_link = d.get('LinkAnh', '')
-                        if raw_link: 
-                            thumb_link = convert_drive_link(raw_link)
-                            st.image(thumb_link, use_container_width=True)
-                            st.markdown(f"**{d['TenAnh']}**")
-                            # Link tải về
-                            st.markdown(f'<a href="{raw_link}" target="_blank" class="download-link">📥 Tải về máy</a>', unsafe_allow_html=True)
-                            
-                        with st.expander("Ghi chú"): st.write(d.get('GhiChu'))
-
-    # 5. MẪU CONTENT
-    elif st.session_state.current_page == "templates" and sheet_templates:
-        st.header("📋 Mẫu Content")
-        with st.expander("➕ Thêm mẫu"):
-            with st.form("nt"):
-                tt = st.text_input("Tiêu đề"); ct = st.text_area("Nội dung")
-                if st.form_submit_button("Lưu"): sheet_templates.append_row([tt, ct, datetime.now().strftime("%d/%m/%Y")]); st.rerun()
-        data = sheet_templates.get_all_records()
-        for d in data:
-            with st.container(border=True):
-                st.subheader(d['TieuDe']); st.code(d['NoiDung'], language='text')
+    # Đã xóa phần 4. KHO ẢNH và 5. MẪU CONTENT
 
     # 6. ADMIN
     elif st.session_state.current_page == "admin":
