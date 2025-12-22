@@ -20,25 +20,24 @@ except ImportError:
 # --- CẤU HÌNH HỆ THỐNG ---
 st.set_page_config(page_title="HR System Pro", layout="wide", page_icon="💎")
 
-# ĐỊNH NGHĨA QUY TRÌNH & DEADLINE (SLA - Số ngày tối đa cho mỗi bước)
+# ĐỊNH NGHĨA QUY TRÌNH & DEADLINE (SLA)
 WORKFLOW = {
-    "Mới nhận": {"step": 1, "sla": 2, "color": "blue"},      # Tối đa 2 ngày phải xử lý
-    "Sơ loại":  {"step": 2, "sla": 3, "color": "cyan"},
-    "Phỏng vấn": {"step": 3, "sla": 5, "color": "orange"},
-    "Chờ kết quả": {"step": 4, "sla": 7, "color": "yellow"},
-    "Đạt / Chờ đi làm": {"step": 5, "sla": 10, "color": "green"},
-    "Đã đi làm": {"step": 6, "sla": 0, "color": "green"},     # Hoàn thành (Success)
-    "Loại": {"step": 6, "sla": 0, "color": "red"},            # Hoàn thành (Fail)
-    "Nghỉ việc": {"step": 6, "sla": 0, "color": "grey"}
+    "Mới nhận": {"step": 1, "sla": 2},      
+    "Sơ loại":  {"step": 2, "sla": 3},
+    "Phỏng vấn": {"step": 3, "sla": 5},
+    "Chờ kết quả": {"step": 4, "sla": 7},
+    "Đạt / Chờ đi làm": {"step": 5, "sla": 10},
+    "Đã đi làm": {"step": 6, "sla": 0},     
+    "Loại": {"step": 6, "sla": 0},           
+    "Nghỉ việc": {"step": 6, "sla": 0}
 }
 
-# Link Apps Script (Giữ nguyên của bạn)
+# Link Apps Script (Giữ nguyên)
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzKueqCnPonJ1MsFzQpQDk7ihgnVVQyNHMUyc_dx6AocsDu1jW1zf6Gr9VgqMD4D00/exec"
 
-# --- CSS GIAO DIỆN NÂNG CAO ---
+# --- CSS GIAO DIỆN ---
 st.markdown("""
     <style>
-    /* Sidebar */
     [data-testid="stSidebar"] {background-color: #f8f9fa;}
     [data-testid="stSidebar"] .stButton > button {
         width: 100%; height: 50px; border: none; border-radius: 8px;
@@ -47,16 +46,10 @@ st.markdown("""
     }
     [data-testid="stSidebar"] .stButton > button:hover {background-color: #e3f2fd; color: #1565c0;}
     
-    /* Sticky Note Style */
     .sticky-note {
         background-color: #fff9c4; padding: 15px; border-radius: 5px; 
         border-left: 5px solid #fbc02d; box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
         font-family: 'Courier New', monospace; margin-bottom: 10px;
-    }
-    
-    /* Timeline Status */
-    .status-badge {
-        padding: 5px 10px; border-radius: 15px; font-size: 12px; font-weight: bold; color: white;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -74,7 +67,6 @@ def get_gcp_service():
 client = get_gcp_service()
 if not client: st.error("⚠️ Lỗi kết nối Secrets!"); st.stop()
 
-# MỞ SHEET
 try:
     sheet_ungvien = client.open("TuyenDungKCN_Data").worksheet("UngVien")
     sheet_users = client.open("TuyenDungKCN_Data").worksheet("Users")
@@ -100,21 +92,15 @@ def convert_drive_link(link):
     return link
 
 def calculate_deadline_status(start_date_str, status):
-    """Tính toán hạn deadline dựa trên ngày nhập hồ sơ"""
     try:
         if status not in WORKFLOW or WORKFLOW[status]['sla'] == 0:
-            return None, "completed" # Không tính deadline cho trạng thái kết thúc
-        
+            return None, "completed"
         start_date = datetime.strptime(start_date_str, "%d/%m/%Y")
-        days_allowed = WORKFLOW[status]['sla']
-        deadline_date = start_date + timedelta(days=days_allowed)
+        deadline_date = start_date + timedelta(days=WORKFLOW[status]['sla'])
         days_left = (deadline_date - datetime.now()).days
-        
         return days_left, deadline_date.strftime("%d/%m/%Y")
-    except:
-        return None, None
+    except: return None, None
 
-# --- HÀM XUẤT WORD ---
 def create_word_file(data):
     doc = Document()
     style = doc.styles['Normal']; font = style.font; font.name = 'Times New Roman'; font.size = Pt(13)
@@ -210,22 +196,20 @@ def main_app():
             with c2: st.metric("Đã Đi Làm", len(df[df[tt_col]=='Đã đi làm']) if tt_col else 0)
             with c3: st.metric("Phỏng Vấn", len(df[df[tt_col]=='Phỏng vấn']) if tt_col else 0)
             
-            # Tính Warning (Quá hạn)
             overdue_count = 0
             if 'NgayNhap' in df.columns and tt_col:
                 for _, row in df.iterrows():
                     days_left, _ = calculate_deadline_status(row['NgayNhap'], row[tt_col])
                     if days_left is not None and days_left < 0: overdue_count += 1
-            
-            with c4: st.metric("⚠️ Deadline Quá Hạn", overdue_count, delta_color="inverse")
+            with c4: st.metric("⚠️ Quá Hạn", overdue_count, delta_color="inverse")
             
             st.markdown("---")
             col_chart, col_table = st.columns([1, 1])
             with col_chart:
-                st.subheader("Tiến độ tuyển dụng")
+                st.subheader("Tiến độ")
                 if tt_col: st.bar_chart(df[tt_col].value_counts())
             with col_table:
-                st.subheader("Top Người Tuyển")
+                st.subheader("Top Tuyển Dụng")
                 if 'NguoiTuyen' in df.columns:
                     top = df['NguoiTuyen'].value_counts().reset_index(); top.columns = ['Recruiter', 'Count']
                     st.dataframe(top, use_container_width=True, hide_index=True)
@@ -263,11 +247,9 @@ def main_app():
                         link_drive = ""
                         if uploaded_file: link_drive = upload_via_appsscript(uploaded_file, f"{name}_{phone}.jpg")
                         
-                        # Tạo log ban đầu
                         now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
                         history_log = f"[{now_str}] {st.session_state.user_name}: Tạo mới hồ sơ."
                         
-                        # Cấu trúc: [NgayNhap, Ten, DOB, Que, SDT, CCCD, ViTri, Status, GhiChu, Nguon, Anh, Xe, KTX, User, FB, TT, GiayTo, Lịch Sử]
                         row = [datetime.now().strftime("%d/%m/%Y"), name.upper(), dob.strftime("%d/%m/%Y"), hometown, 
                                f"'{phone}", f"'{cccd}", pos, "Mới nhận", note, source, link_drive, bus, ktx, 
                                st.session_state.user_name, fb, tt, doc, history_log]
@@ -275,26 +257,25 @@ def main_app():
                         st.success("✅ Đã thêm hồ sơ!"); time.sleep(1); st.rerun()
                 else: st.error("Thiếu Tên hoặc SĐT!")
 
-    # 3. DANH SÁCH & QUẢN LÝ
+    # 3. DANH SÁCH (TÍNH NĂNG FULL: XEM + SỬA + QUY TRÌNH)
     elif st.session_state.current_page == "list":
-        st.header("🗂️ Quản Lý Hồ Sơ & Quy Trình")
+        st.header("🗂️ Quản Lý Hồ Sơ")
         if st.button("🔄 Cập nhật dữ liệu"): st.cache_data.clear(); st.rerun()
 
         if not df.empty:
-            search = st.text_input("🔎 Tìm kiếm (Tên, SĐT, CCCD...):")
+            search = st.text_input("🔎 Tìm kiếm:")
             df_show = df[df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)] if search else df
             
-            # Bộ lọc trạng thái
-            status_filter = st.multiselect("Lọc trạng thái", list(WORKFLOW.keys()))
-            if status_filter: df_show = df_show[df_show['TrangThai'].isin(status_filter)]
+            # Filter
+            st_filter = st.multiselect("Lọc trạng thái", list(WORKFLOW.keys()))
+            if st_filter: df_show = df_show[df_show['TrangThai'].isin(st_filter)]
 
             st.dataframe(df_show[['HoTen', 'SDT', 'ViTri', 'TrangThai']], use_container_width=True, hide_index=True)
-            st.write(f"Tìm thấy: **{len(df_show)}** hồ sơ")
             st.markdown("---")
 
             for i, row in df_show.iterrows():
                 with st.container(border=True):
-                    # --- Header: Ảnh + Tên + Deadline ---
+                    # --- Header ---
                     c1, c2 = st.columns([1, 4])
                     with c1:
                         raw_link = str(row.get('LinkAnh', ''))
@@ -302,89 +283,98 @@ def main_app():
                     with c2:
                         st.subheader(f"{row['HoTen']} ({row.get('NamSinh', '')})")
                         
-                        # Tính Deadline/SLA
+                        # Deadline
                         days_left, deadline_date = calculate_deadline_status(row['NgayNhap'], row['TrangThai'])
-                        sla_badge = ""
-                        if days_left is not None:
-                            if days_left < 0: sla_badge = f"🔴 Quá hạn {abs(days_left)} ngày (Deadline: {deadline_date})"
-                            elif days_left <= 1: sla_badge = f"🟠 Gấp: Còn {days_left} ngày (Deadline: {deadline_date})"
-                            else: sla_badge = f"🟢 Còn {days_left} ngày (Deadline: {deadline_date})"
+                        sla_txt = f" | Deadline: {deadline_date}" if days_left is not None else ""
+                        st.markdown(f"**{row['ViTri']}** | `{row['TrangThai']}`{sla_txt}")
                         
-                        st.markdown(f"**Vị trí:** {row['ViTri']} | **Trạng thái:** `{row['TrangThai']}` {sla_badge}")
-                        
-                        # Thanh tiến trình
-                        current_step = WORKFLOW.get(row['TrangThai'], {}).get('step', 0)
-                        total_steps = 6
-                        st.progress(current_step / total_steps, text=f"Quy trình: Bước {current_step}/{total_steps}")
+                        # Progress
+                        cur_step = WORKFLOW.get(row['TrangThai'], {}).get('step', 0)
+                        st.progress(cur_step / 6, text=f"Tiến độ: Bước {cur_step}/6")
 
-                    # --- Tabs Chi Tiết ---
-                    t1, t2, t3 = st.tabs(["ℹ️ Thông Tin", "📝 Sticky Note & Lịch Sử", "⚙️ Tác Vụ"])
+                    # --- Tabs ---
+                    t1, t2, t3 = st.tabs(["ℹ️ Chi Tiết", "📝 Ghi Chú & Lịch Sử", "⚙️ Chỉnh Sửa & Tác Vụ"])
                     
                     with t1:
-                        col_a, col_b = st.columns(2)
-                        with col_a:
-                            st.write(f"📞 SĐT: **{row['SDT']}**")
-                            st.write(f"🆔 CCCD: {row.get('CCCD', '--')}")
-                            st.write(f"🏠 Quê quán: {row['QueQuan']}")
-                        with col_b:
-                            st.write(f"🚌 Xe tuyến: {row.get('XeTuyen', '--')}")
-                            st.write(f"🏨 KTX: {row.get('KTX', '--')}")
+                        c_a, c_b = st.columns(2)
+                        with c_a:
+                            st.write(f"📞 SĐT: {row['SDT']}"); st.write(f"🆔 CCCD: {row.get('CCCD', '--')}")
+                            st.write(f"🏠 Quê: {row['QueQuan']}")
+                        with c_b:
+                            st.write(f"🚌 Xe: {row.get('XeTuyen', '--')}"); st.write(f"🏨 KTX: {row.get('KTX', '--')}")
                             st.write(f"📄 Giấy tờ: {row.get('GiayTo', '--')}")
-
-                    with t2:
-                        # STICKY NOTE
-                        st.markdown(f"""<div class="sticky-note">📌 <b>Ghi chú quan trọng:</b><br>{row.get('GhiChu', '(Trống)')}</div>""", unsafe_allow_html=True)
-                        
-                        # LỊCH SỬ
-                        with st.expander("📜 Xem lịch sử chi tiết"):
-                            history_text = str(row.get('LichSu', '')).replace('\n', '<br>')
-                            st.markdown(history_text if history_text else "Chưa có lịch sử", unsafe_allow_html=True)
-
-                    with t3:
-                        with st.form(key=f"action_{i}"):
-                            # Chuyển trạng thái
-                            new_status = st.selectbox("Cập nhật Trạng Thái:", list(WORKFLOW.keys()), index=list(WORKFLOW.keys()).index(row['TrangThai']) if row['TrangThai'] in WORKFLOW else 0)
-                            
-                            # Cập nhật Note
-                            new_note = st.text_area("Cập nhật Sticky Note:", value=row.get('GhiChu', ''))
-                            
-                            c_btn1, c_btn2 = st.columns(2)
-                            is_save = c_btn1.form_submit_button("💾 Lưu Thay Đổi")
-                            
-                            # Xuất Word (Nằm ngoài form submit để tránh reload)
                         
                         if st.button("📄 Tải File Word", key=f"dl_{i}"):
                              doc_file = create_word_file(row)
                              st.download_button("Click tải xuống", doc_file, f"{row['HoTen']}.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
-                        if is_save:
-                            try:
-                                cell = sheet_ungvien.find(str(row['SDT']))
-                                if cell:
-                                    # Logic ghi log lịch sử
-                                    now = datetime.now().strftime("%d/%m/%Y %H:%M")
-                                    log_entry = ""
-                                    
-                                    # Kiểm tra thay đổi trạng thái
-                                    if new_status != row['TrangThai']:
-                                        log_entry += f"[{now}] {st.session_state.user_name}: Đổi trạng thái từ '{row['TrangThai']}' -> '{new_status}'\n"
-                                        sheet_ungvien.update_cell(cell.row, 8, new_status) # Cột 8: TrangThai
-                                    
-                                    # Kiểm tra thay đổi Note
-                                    if new_note != row.get('GhiChu', ''):
-                                        sheet_ungvien.update_cell(cell.row, 9, new_note) # Cột 9: GhiChu
-                                        log_entry += f"[{now}] {st.session_state.user_name}: Cập nhật ghi chú.\n"
+                    with t2:
+                        st.markdown(f"""<div class="sticky-note">📌 <b>Ghi chú:</b><br>{row.get('GhiChu', '(Trống)')}</div>""", unsafe_allow_html=True)
+                        with st.expander("📜 Xem lịch sử"):
+                            st.markdown(str(row.get('LichSu', '')).replace('\n', '<br>'), unsafe_allow_html=True)
 
-                                    # Ghi thêm vào lịch sử (Cột 18)
-                                    if log_entry:
-                                        old_history = row.get('LichSu', '')
-                                        new_history = log_entry + str(old_history)
-                                        sheet_ungvien.update_cell(cell.row, 18, new_history) # Cột 18: LichSu
+                    # --- TAB 3: CHỈNH SỬA TOÀN BỘ (ĐÃ KHÔI PHỤC) ---
+                    with t3:
+                        with st.form(key=f"full_edit_{i}"):
+                            st.write("#### ✏️ Cập nhật thông tin hồ sơ")
+                            # 1. Thông tin cá nhân
+                            ec1, ec2 = st.columns(2)
+                            new_name = ec1.text_input("Họ tên", value=row['HoTen'])
+                            # Xử lý CCCD để hiển thị đẹp (bỏ dấu ')
+                            curr_cccd = str(row.get('CCCD','')).replace("'","")
+                            new_cccd = ec2.text_input("CCCD", value=curr_cccd)
+                            
+                            # 2. Công việc & Quê quán
+                            ec3, ec4 = st.columns(2)
+                            new_hometown = ec3.text_input("Quê quán", value=row['QueQuan'])
+                            
+                            pos_opts = ["Công nhân", "Kỹ thuật", "Kho", "Bảo vệ", "Tạp vụ", "Khác"]
+                            p_idx = pos_opts.index(row['ViTri']) if row['ViTri'] in pos_opts else 0
+                            new_pos = ec4.selectbox("Vị trí ứng tuyển", pos_opts, index=p_idx)
+
+                            st.markdown("---")
+                            st.write("#### 🔄 Trạng thái & Ghi chú")
+                            
+                            # 3. Trạng thái & Note
+                            wf_keys = list(WORKFLOW.keys())
+                            s_idx = wf_keys.index(row['TrangThai']) if row['TrangThai'] in wf_keys else 0
+                            new_status = st.selectbox("Trạng thái hiện tại", wf_keys, index=s_idx)
+                            
+                            new_note = st.text_area("Ghi chú (Sticky Note)", value=row.get('GhiChu', ''))
+
+                            # Nút lưu duy nhất
+                            if st.form_submit_button("💾 LƯU TẤT CẢ THAY ĐỔI"):
+                                try:
+                                    cell = sheet_ungvien.find(str(row['SDT']))
+                                    if cell:
+                                        # Tạo log lịch sử
+                                        now = datetime.now().strftime("%d/%m/%Y %H:%M")
+                                        log_entry = ""
                                         
-                                        st.success("✅ Đã cập nhật!"); time.sleep(1); st.rerun()
-                                    else:
-                                        st.info("Không có thay đổi nào.")
-                            except Exception as e: st.error(f"Lỗi: {e}")
+                                        # Kiểm tra các thay đổi quan trọng để ghi log
+                                        if new_status != row['TrangThai']:
+                                            log_entry += f"[{now}] {st.session_state.user_name}: Đổi trạng thái '{row['TrangThai']}' -> '{new_status}'\n"
+                                        if new_name != row['HoTen']:
+                                            log_entry += f"[{now}] {st.session_state.user_name}: Sửa tên thành '{new_name}'\n"
+                                        if new_note != row.get('GhiChu', ''):
+                                            log_entry += f"[{now}] {st.session_state.user_name}: Cập nhật ghi chú.\n"
+
+                                        # CẬP NHẬT GOOGLE SHEET (Mapping đúng cột)
+                                        # Cột 2: Tên, 4: Quê, 6: CCCD, 7: Vị trí, 8: Trạng thái, 9: Ghi chú, 18: Lịch sử
+                                        sheet_ungvien.update_cell(cell.row, 2, new_name.upper())
+                                        sheet_ungvien.update_cell(cell.row, 4, new_hometown)
+                                        sheet_ungvien.update_cell(cell.row, 6, f"'{new_cccd}") # Thêm ' để giữ số 0
+                                        sheet_ungvien.update_cell(cell.row, 7, new_pos)
+                                        sheet_ungvien.update_cell(cell.row, 8, new_status)
+                                        sheet_ungvien.update_cell(cell.row, 9, new_note)
+                                        
+                                        if log_entry:
+                                            old_hist = row.get('LichSu', '')
+                                            sheet_ungvien.update_cell(cell.row, 18, log_entry + str(old_hist))
+
+                                        st.success("✅ Đã cập nhật thành công!"); time.sleep(1); st.rerun()
+                                    else: st.error("Lỗi: Không tìm thấy SĐT trong dữ liệu gốc.")
+                                except Exception as e: st.error(f"Lỗi: {e}")
 
     # 4. ADMIN
     elif st.session_state.current_page == "admin":
