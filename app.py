@@ -4,17 +4,17 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import time
 from datetime import datetime, date
-import qrcode
-from io import BytesIO
 import requests
 import base64
+from io import BytesIO
 
-# --- THƯ VIỆN XỬ LÝ WORD ---
+# --- KIỂM TRA THƯ VIỆN WORD ---
 try:
     from docx import Document
-    from docx.shared import Pt
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
 except ImportError:
-    st.error("Chưa cài thư viện python-docx. Vui lòng chạy: pip install python-docx")
+    st.error("⚠️ Lỗi: Chưa cài thư viện python-docx. Vui lòng chạy lệnh: pip install python-docx")
     st.stop()
 
 # --- CẤU HÌNH ---
@@ -43,7 +43,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- KẾT NỐI ---
+# --- KẾT NỐI GOOGLE SHEETS ---
 @st.cache_resource
 def get_gcp_service():
     try:
@@ -81,39 +81,80 @@ def convert_drive_link(link):
         return f"https://drive.google.com/thumbnail?id={file_id}&sz=w1000" 
     return link
 
-# --- HÀM TẠO FILE WORD ---
+# --- HÀM XUẤT WORD (CHUẨN FONT TIMES NEW ROMAN) ---
 def create_word_file(data):
     doc = Document()
     
+    # Cấu hình Font mặc định
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Times New Roman'
+    font.size = Pt(13)
+
     # Tiêu đề
     head = doc.add_heading(f"HỒ SƠ ỨNG VIÊN: {data['HoTen']}", 0)
-    head.alignment = 1 # Center
+    head.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for run in head.runs:
+        run.font.name = 'Times New Roman'
+        run.font.size = Pt(16)
+        run.font.bold = True
+        run.font.color.rgb = RGBColor(0, 0, 0) # Màu đen
 
-    # Thông tin cơ bản
-    doc.add_paragraph(f"Vị trí ứng tuyển: {data['ViTri']}")
-    doc.add_paragraph(f"Trạng thái hiện tại: {data['TrangThai']}")
+    # Hàm phụ trợ để thêm dòng
+    def add_line(label, value):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(6)
+        runner = p.add_run(f"{label}: ")
+        runner.font.name = 'Times New Roman'
+        runner.font.bold = True
+        
+        val_str = str(value) if value else ""
+        runner_val = p.add_run(val_str)
+        runner_val.font.name = 'Times New Roman'
+
+    # Thông tin tóm tắt
+    p_sub = doc.add_paragraph()
+    p_sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run_sub = p_sub.add_run(f"(Vị trí: {data['ViTri']} | Trạng thái: {data['TrangThai']})")
+    run_sub.font.name = 'Times New Roman'
+    run_sub.italic = True
     
-    # I. Thông tin cá nhân
-    doc.add_heading('I. THÔNG TIN CÁ NHÂN', level=1)
-    p = doc.add_paragraph()
-    p.add_run("Họ và tên: ").bold = True; p.add_run(f"{data['HoTen']}\n")
-    p.add_run("Ngày sinh: ").bold = True; p.add_run(f"{data['NamSinh']}\n")
-    p.add_run("Số điện thoại: ").bold = True; p.add_run(f"{data['SDT']}\n")
-    p.add_run("CCCD: ").bold = True; p.add_run(f"{data.get('CCCD', '')}\n")
-    p.add_run("Quê quán: ").bold = True; p.add_run(f"{data['QueQuan']}")
+    doc.add_paragraph("") # Dòng trống
 
-    # II. Thông tin bổ sung
-    doc.add_heading('II. THÔNG TIN BỔ SUNG', level=1)
-    p2 = doc.add_paragraph()
-    p2.add_run(f"Nguồn tuyển dụng: {data.get('Nguồn', '')}\n")
-    p2.add_run(f"Đăng ký xe tuyến: {data.get('XeTuyen', '')}\n")
-    p2.add_run(f"Nhu cầu KTX: {data.get('KTX', '')}\n")
-    p2.add_run(f"Tình trạng giấy tờ: {data.get('GiayTo', '')}")
+    # I. THÔNG TIN CÁ NHÂN
+    h1 = doc.add_heading('I. THÔNG TIN CÁ NHÂN', level=1)
+    for run in h1.runs:
+        run.font.name = 'Times New Roman'; run.font.size = Pt(14); run.font.color.rgb = RGBColor(0,0,0)
+
+    add_line("Họ và tên", data['HoTen'])
+    add_line("Ngày sinh", data['NamSinh'])
+    add_line("Số điện thoại", data['SDT'])
+    add_line("CCCD", data.get('CCCD', ''))
+    add_line("Quê quán", data['QueQuan'])
+
+    # II. THÔNG TIN KHÁC
+    h2 = doc.add_heading('II. THÔNG TIN KHÁC', level=1)
+    for run in h2.runs:
+        run.font.name = 'Times New Roman'; run.font.size = Pt(14); run.font.color.rgb = RGBColor(0,0,0)
+
+    # Xử lý an toàn nếu thiếu cột
+    nguon = data.get('Nguồn', data.get('Nguon', ''))
+    xe = data.get('XeTuyen', '')
+    ktx = data.get('KTX', '')
+    giayto = data.get('GiayTo', '')
+
+    add_line("Nguồn tuyển dụng", nguon)
+    add_line("Đăng ký xe tuyến", xe)
+    add_line("Nhu cầu KTX", ktx)
+    add_line("Tình trạng giấy tờ", giayto)
 
     # Footer
-    doc.add_paragraph(f"\nNgày xuất hồ sơ: {datetime.now().strftime('%d/%m/%Y')}")
+    doc.add_paragraph("")
+    p_footer = doc.add_paragraph(f"Ngày xuất hồ sơ: {datetime.now().strftime('%d/%m/%Y')}")
+    p_footer.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    for run in p_footer.runs:
+        run.font.name = 'Times New Roman'; run.font.italic = True; run.font.size = Pt(11)
 
-    # Lưu vào buffer
     buf = BytesIO()
     doc.save(buf)
     buf.seek(0)
@@ -124,7 +165,7 @@ if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'current_page' not in st.session_state: st.session_state.current_page = "dashboard"
 def set_page(page_name): st.session_state.current_page = page_name
 
-# --- LOGIN ---
+# --- LOGIN SCREEN ---
 def login_screen():
     st.markdown("<br><h1 style='text-align: center; color:#1565c0'>🔐 HR SYSTEM PRO</h1>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1,1,1])
@@ -151,7 +192,11 @@ def login_screen():
 
 # --- MAIN APP ---
 def main_app():
-    df = pd.DataFrame(sheet_ungvien.get_all_records())
+    # Lấy dữ liệu và làm sạch tên cột (bỏ khoảng trắng thừa nếu có)
+    raw_data = sheet_ungvien.get_all_records()
+    df = pd.DataFrame(raw_data)
+    # Chuẩn hóa tên cột để tránh lỗi
+    df.columns = [c.strip() for c in df.columns]
 
     with st.sidebar:
         st.markdown(f"### 👤 {st.session_state.user_name}")
@@ -167,21 +212,48 @@ def main_app():
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🚪 Đăng xuất"): st.session_state.logged_in = False; st.rerun()
 
-    # 1. DASHBOARD
+    # 1. DASHBOARD (ĐÃ SỬA LỖI & ĐỔI GIAO DIỆN)
     if st.session_state.current_page == "dashboard":
         st.title("📊 Tổng Quan")
         if not df.empty:
+            # Metrics
             c1, c2, c3 = st.columns(3)
+            # Kiểm tra cột TrangThai tồn tại không
+            tt_col = 'TrangThai' if 'TrangThai' in df.columns else None
+            
+            da_di_lam = len(df[df[tt_col]=='Đã đi làm']) if tt_col else 0
+            moi_nhan = len(df[df[tt_col]=='Mới nhận']) if tt_col else 0
+            
             with c1: st.metric("Tổng Hồ Sơ", len(df))
-            with c2: st.metric("Đã Đi Làm", len(df[df['TrangThai']=='Đã đi làm']))
-            with c3: st.metric("Mới Nhận", len(df[df['TrangThai']=='Mới nhận']))
+            with c2: st.metric("Đã Đi Làm", da_di_lam)
+            with c3: st.metric("Mới Nhận", moi_nhan)
+            
             st.markdown("---")
             c4, c5 = st.columns([2, 1])
+            
+            # --- CẬP NHẬT: HIỂN THỊ DẠNG BẢNG THAY VÌ BIỂU ĐỒ ---
             with c4: 
                 st.subheader("🏆 Top Tuyển Dụng")
-                if 'NguoiTuyen' in df.columns: st.bar_chart(df['NguoiTuyen'].value_counts())
+                if 'NguoiTuyen' in df.columns:
+                    # Tạo bảng thống kê
+                    top_recruiter = df['NguoiTuyen'].value_counts().reset_index()
+                    top_recruiter.columns = ['Người Tuyển', 'Số Lượng Hồ Sơ'] # Đổi tên cột hiển thị
+                    st.dataframe(top_recruiter, use_container_width=True, hide_index=True)
+                else:
+                    st.warning("⚠️ Không tìm thấy cột 'NguoiTuyen' trong dữ liệu.")
+
+            # --- CẬP NHẬT: SỬA LỖI KEYERROR 'NGUỒN' ---
             with c5: 
-                st.subheader("🎯 Nguồn"); st.dataframe(df['Nguồn'].value_counts(), use_container_width=True)
+                st.subheader("🎯 Nguồn")
+                # Tìm cột Nguồn (có dấu hoặc không dấu)
+                col_nguon = None
+                if 'Nguồn' in df.columns: col_nguon = 'Nguồn'
+                elif 'Nguon' in df.columns: col_nguon = 'Nguon'
+                
+                if col_nguon:
+                    st.dataframe(df[col_nguon].value_counts(), use_container_width=True)
+                else:
+                    st.info("⚠️ Không tìm thấy cột 'Nguồn'")
 
     # 2. NHẬP LIỆU
     elif st.session_state.current_page == "input":
@@ -226,25 +298,23 @@ def main_app():
                         st.success("✅ Thành công!"); time.sleep(1); st.rerun()
                 else: st.error("Vui lòng nhập Tên và SĐT!")
 
-    # 3. DANH SÁCH (TÍNH NĂNG CAO CẤP: SỬA + XUẤT WORD)
+    # 3. DANH SÁCH (TRA CỨU + SỬA + WORD)
     elif st.session_state.current_page == "list":
         st.header("🔍 Tra Cứu & Quản Lý Hồ Sơ")
         
-        # Nút reload để cập nhật dữ liệu mới nhất
         if st.button("🔄 Làm mới dữ liệu", type="secondary"):
             st.cache_data.clear()
             st.rerun()
 
         if not df.empty:
             search = st.text_input("🔎 Tìm kiếm (Tên, SĐT...):")
-            # Filter
             df_show = df[df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)] if search else df
             
             # Overview Table
             st.dataframe(df_show[['HoTen', 'SDT', 'ViTri', 'TrangThai']], use_container_width=True, hide_index=True)
             
             st.write("---")
-            st.write(f"### 📂 Chi tiết hồ sơ ({len(df_show)} kết quả):")
+            st.write(f"### 📂 Chi tiết ({len(df_show)} hồ sơ):")
 
             for i, row in df_show.iterrows():
                 with st.container(border=True):
@@ -256,14 +326,15 @@ def main_app():
                         if raw_link and raw_link.startswith('http'):
                             thumb_link = convert_drive_link(raw_link)
                             st.image(thumb_link, width=150)
-                        else:
-                            st.info("Chưa có ảnh")
+                        else: st.info("No Image")
 
                     # 2. Thông tin
                     with c2:
                         st.subheader(f"{row['HoTen']} ({row['NamSinh']})")
                         st.write(f"📞 **{row['SDT']}**")
-                        st.write(f"🆔 CCCD: {row.get('CCCD', '---')}")
+                        # Xử lý hiển thị CCCD an toàn
+                        cccd_val = row.get('CCCD', '---')
+                        st.write(f"🆔 CCCD: {cccd_val}")
                         st.write(f"🏠 Quê quán: {row['QueQuan']}")
                         st.write(f"💼 Vị trí: {row['ViTri']} | Trạng thái: **{row['TrangThai']}**")
                     
@@ -283,45 +354,44 @@ def main_app():
                         )
 
                     # >> FORM CHỈNH SỬA
-                    with st.expander(f"✏️ Chỉnh sửa thông tin: {row['HoTen']}"):
+                    with st.expander(f"✏️ Chỉnh sửa: {row['HoTen']}"):
                         with st.form(key=f"edit_form_{i}"):
                             e_c1, e_c2 = st.columns(2)
                             new_name = e_c1.text_input("Họ tên", value=row['HoTen'])
-                            # Xử lý CCCD để bỏ dấu ' nếu có khi hiển thị
+                            
+                            # Xử lý CCCD để bỏ dấu ' nếu có
                             current_cccd = str(row.get('CCCD','')).replace("'","")
                             new_cccd = e_c2.text_input("CCCD", value=current_cccd)
                             
                             e_c3, e_c4 = st.columns(2)
                             new_hometown = e_c3.text_input("Quê quán", value=row['QueQuan'])
                             
-                            # Xử lý Selectbox
+                            # Selectbox an toàn
                             list_pos = ["Công nhân", "Kỹ thuật", "Kho", "Bảo vệ", "Tạp vụ", "Khác"]
-                            idx_pos = list_pos.index(row['ViTri']) if row['ViTri'] in list_pos else 0
-                            new_pos = e_c4.selectbox("Vị trí", list_pos, index=idx_pos)
+                            val_pos = row['ViTri'] if row['ViTri'] in list_pos else list_pos[0]
+                            new_pos = e_c4.selectbox("Vị trí", list_pos, index=list_pos.index(val_pos))
                             
                             list_status = ["Mới nhận", "Phỏng vấn", "Đạt", "Đã đi làm", "Loại", "Nghỉ việc"]
-                            idx_status = list_status.index(row['TrangThai']) if row['TrangThai'] in list_status else 0
-                            new_status = st.selectbox("Trạng thái", list_status, index=idx_status)
+                            val_stt = row['TrangThai'] if row['TrangThai'] in list_status else list_status[0]
+                            new_status = st.selectbox("Trạng thái", list_status, index=list_status.index(val_stt))
                             
                             if st.form_submit_button("💾 CẬP NHẬT LẠI"):
                                 try:
-                                    # Tìm dòng dựa vào SĐT
+                                    # Tìm dòng dựa vào SĐT (Unique Key)
                                     cell = sheet_ungvien.find(str(row['SDT']))
                                     if cell:
-                                        # Cập nhật các cột tương ứng (Dựa trên cấu trúc mảng row lúc nhập liệu)
-                                        sheet_ungvien.update_cell(cell.row, 2, new_name.upper()) # Cột 2: Tên
-                                        sheet_ungvien.update_cell(cell.row, 4, new_hometown)     # Cột 4: Quê
-                                        sheet_ungvien.update_cell(cell.row, 6, f"'{new_cccd}")   # Cột 6: CCCD (Thêm ' để không mất số 0)
-                                        sheet_ungvien.update_cell(cell.row, 7, new_pos)          # Cột 7: Vị trí
-                                        sheet_ungvien.update_cell(cell.row, 8, new_status)       # Cột 8: Trạng thái
-                                        
-                                        st.success("✅ Đã cập nhật xong! Bấm 'Làm mới dữ liệu' để xem kết quả.")
-                                    else:
-                                        st.error("⚠️ Không tìm thấy SĐT trong dữ liệu gốc.")
-                                except Exception as e:
-                                    st.error(f"Lỗi khi lưu: {e}")
+                                        # Update các cột tương ứng (Cần map đúng cột trong Excel của bạn)
+                                        # Giả định thứ tự: [Ngay, HoTen, NamSinh, QueQuan, SDT, CCCD, ViTri, TrangThai...]
+                                        sheet_ungvien.update_cell(cell.row, 2, new_name.upper()) # Col 2: HoTen
+                                        sheet_ungvien.update_cell(cell.row, 4, new_hometown)     # Col 4: QueQuan
+                                        sheet_ungvien.update_cell(cell.row, 6, f"'{new_cccd}")   # Col 6: CCCD
+                                        sheet_ungvien.update_cell(cell.row, 7, new_pos)          # Col 7: ViTri
+                                        sheet_ungvien.update_cell(cell.row, 8, new_status)       # Col 8: TrangThai
+                                        st.success("✅ Đã cập nhật xong! Bấm 'Làm mới' để xem.")
+                                    else: st.error("⚠️ Không tìm thấy SĐT trong file gốc.")
+                                except Exception as e: st.error(f"Lỗi: {e}")
 
-    # 6. ADMIN
+    # 4. ADMIN
     elif st.session_state.current_page == "admin":
         st.header("⚙️ Admin"); users = sheet_users.get_all_records(); st.dataframe(users)
         with st.form("rl"):
